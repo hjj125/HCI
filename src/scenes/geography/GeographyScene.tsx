@@ -296,7 +296,11 @@ export function GeographyScene({ active }: SceneProps) {
       <span className="help">{mode === 'rotate' ? '捏合或按住地球拖动即可旋转（鼠标滚轮缩放）' : '指向区域后捏合“点击”即可选中（鼠标单击）'}</span>
     </div>
     <div className="geo-host" ref={host}
-      onPointerDown={e => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 忽略 */ } const p = canvasPos(e); pointerState.current = { down: true, moved: 0, x: p.x, y: p.y }; }}
+      onPointerDown={e => {
+        if ((e.target as HTMLElement).closest('.globe-overlay')) return; // 浮层内点击交给按钮，勿抢指针捕获
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 忽略 */ }
+        const p = canvasPos(e); pointerState.current = { down: true, moved: 0, x: p.x, y: p.y };
+      }}
       onPointerMove={e => {
         const s = pointerState.current; if (!s.down) return;
         const p = canvasPos(e);
@@ -305,10 +309,15 @@ export function GeographyScene({ active }: SceneProps) {
         s.x = p.x; s.y = p.y;
       }}
       onPointerUp={e => {
-        const s = pointerState.current; s.down = false;
+        const s = pointerState.current;
+        if (!s.down) return; // 浮层按钮点击冒泡的 pointerup，与画布操作无关
+        s.down = false;
         if (mode === 'select' && s.moved < 0.02) { const p = canvasPos(e); selectAt(p.x, p.y); }
       }}
-      onWheel={e => { e.preventDefault(); zoom(e.deltaY > 0 ? 0.2 : -0.2); }}>
+      onWheel={e => {
+        if ((e.target as HTMLElement).closest('.globe-overlay')) return; // 浮层滚动（如聊天列表）不缩放地球
+        e.preventDefault(); zoom(e.deltaY > 0 ? 0.2 : -0.2);
+      }}>
       {regionView && selected && <div className="globe-overlay">
         <div className="overlay-head">
           <h3>{selected.zh}{selected.name !== selected.zh && selected.name !== 'ocean' ? ` · ${selected.name}` : ''}</h3>
