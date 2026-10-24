@@ -1,4 +1,4 @@
-﻿export type SceneId = 'slides' | 'whiteboard' | 'geometry' | 'physics';
+﻿export type SceneId = 'slides' | 'whiteboard' | 'geometry' | 'physics' | 'geography';
 export type InteractionEvent = {
   scene: SceneId; source: 'mouse' | 'hand' | 'keyboard' | 'voice' | 'system';
   intent: 'point' | 'drag' | 'next' | 'previous' | 'undo' | 'reset' | 'switch' | 'predict' | 'hint' | 'submit' | 'laser' | 'run' | 'pause';

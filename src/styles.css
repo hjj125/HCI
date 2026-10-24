@@ -7,6 +7,14 @@
 
 .physics-panel canvas{width:100%;height:460px;background:#0c1727;border:1px solid #26394f;border-radius:10px;margin-top:16px;touch-action:none;display:block}
 .compare polyline{fill:none;stroke:#29b99f;stroke-width:.3;vector-effect:non-scaling-stroke}
+.geo-host{position:relative;height:520px;border-radius:10px;overflow:hidden;margin-top:14px;background:#050914;border:1px solid #1d2f47;touch-action:none}
+.geo-host canvas{display:block}
+.globe-overlay{position:absolute;inset:14px;background:rgba(8,16,30,.93);border:1px solid #2a4360;border-radius:12px;padding:18px 20px;overflow:auto;z-index:3}
+.globe-overlay h3{margin:0 0 6px;font-size:18px;color:#8ff0dc}
+.globe-overlay h4{margin:12px 0 4px;font-size:13px;color:#f4c784}
+.ai-config{display:grid;gap:8px;margin:10px 0}
+.ai-config label{display:grid;gap:4px;font-size:12px;color:#a6bcd3}
+.ai-config input{background:#0b1728;border:1px solid #33465f;border-radius:7px;color:#dde9f7;padding:7px 9px;font:inherit}
 
 /* ===== 平台壳布局：侧边导航 + 工作区（场景插件内容） ===== */
 [hidden]{display:none!important}
