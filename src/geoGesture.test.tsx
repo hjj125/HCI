@@ -33,6 +33,8 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((type: string) =>
     type === '2d' ? ctx : null) as never);
   vi.spyOn(console, 'error').mockImplementation(() => {});
+  // jsdom 未实现 elementFromPoint：start 采样的按钮检查需要它，注入返回空。
+  (document as { elementFromPoint?: unknown }).elementFromPoint = vi.fn(() => null);
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ features: [] }) })));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); hand.emit = null; });
@@ -56,6 +58,18 @@ describe('数字地球手势', () => {
       await sleep(gap);
     }
     await waitFor(() => expect(notice()).toContain('已识别向下挥手 · 视角转向北半球'));
+  });
+
+  it('捏合选中国家后撤手不会带动地球旋转（撤手静默期）', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+    // 捏合选择：start → end
+    act(() => hand.emit!({ x: .5, y: .4, phase: 'start', pinching: true }));
+    act(() => hand.emit!({ x: .5, y: .4, phase: 'end', pinching: false }));
+    // 立刻快速撤手（横向大幅移动，若无静默期会被判定为挥手）
+    await wave(0.3, 0.8);
+    await sleep(300);
+    expect(notice()).not.toContain('已识别向');
   });
 
   it('双手张合样本与张开手掌悬停不导致崩溃（缩放在 WebGL 不可用时安全跳过）', async () => {

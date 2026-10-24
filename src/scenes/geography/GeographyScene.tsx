@@ -46,6 +46,8 @@ export function GeographyScene({ active }: SceneProps) {
   const swipeV = useRef(new VerticalSwipeDetector());
   const twoHandsDist = useRef<number | null>(null);
   const palmHold = useRef<{ since: number; x: number; y: number } | null>(null);
+  // 捏合结束（选中/微调完成）后的撤手静默期：撤手动作不应被误判为挥手。
+  const swipeGraceUntil = useRef(0);
   const host = useRef<HTMLDivElement>(null);
   const world = useRef<World | null>(null);
   const live = useRef({ mode, selected, features, graticule });
@@ -198,7 +200,8 @@ export function GeographyScene({ active }: SceneProps) {
 
   // 手势策略：挥手旋转（带惯性）/ 张掌悬停刹车 / 双手张合缩放 / 捏合拖动 / 捏合点击选区。
   useScenePolicy('geography', sample => {
-    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; return; }
+    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; return; }
+    if (sample.phase === 'end') { swipeGraceUntil.current = performance.now() + 1200; swipe.current.reset(); swipeV.current.reset(); }
     // 双手张合 → 缩放：双手距离增大=放大（靠近），减小=缩小。
     if (sample.hands && sample.hands.length >= 2) {
       const d = Math.hypot(sample.hands[0].x - sample.hands[1].x, sample.hands[0].y - sample.hands[1].y);
@@ -215,7 +218,7 @@ export function GeographyScene({ active }: SceneProps) {
       if (Math.hypot(sample.x - h.x, sample.y - h.y) < 0.045 && performance.now() - h.since > 300) brake.current = true;
     } else palmHold.current = null;
     // 单手挥动 → 角速度冲量（不捏合时）；挥手方向=地球表面移动方向。
-    if (!sample.pinching) {
+    if (!sample.pinching && performance.now() >= swipeGraceUntil.current) {
       const dir = swipe.current.push(sample.x, sample.y, performance.now(), { pinching: false });
       if (dir) {
         spinVel.current = Math.max(-1.6, Math.min(1.6, spinVel.current + (dir === 'right' ? 0.85 : -0.85)));
@@ -226,7 +229,7 @@ export function GeographyScene({ active }: SceneProps) {
         pitchVel.current = Math.max(-1.2, Math.min(1.2, pitchVel.current + (vdir === 'down' ? 0.6 : -0.6)));
         notify(vdir === 'down' ? '已识别向下挥手 · 视角转向北半球' : '已识别向上挥手 · 视角转向南半球');
       }
-    } else { swipe.current.reset(); swipeV.current.reset(); }
+    } else { swipe.current.reset(); swipeV.current.reset(); }  // 捏合中/静默期：清空轨迹，撤手不误判
     if (live.current.mode === 'rotate') {
       if (sample.phase === 'start') { drag.current = { scene: 'geography', x: sample.x, y: sample.y }; return; }
       if (drag.current?.scene === 'geography' && sample.pinching) {
