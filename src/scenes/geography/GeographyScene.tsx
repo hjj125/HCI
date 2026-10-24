@@ -295,6 +295,7 @@ export function GeographyScene({ active }: SceneProps) {
       {regionView && selected && <div className="globe-overlay">
         <h3>{selected.zh}{selected.name !== selected.zh && selected.name !== 'ocean' ? ` · ${selected.name}` : ''}</h3>
         <p className="help">位置：纬度 {selected.lat.toFixed(1)}°，经度 {selected.lon.toFixed(1)}° · {selected.continent}</p>
+        {ai.loading && <p className="notice">AI 讲解生成中（约 3–5 秒）……</p>}
         {(['区位', '地形地貌', '人文特征'] as const).map(k => <div key={k}>
           <h4>{k}{ai.data ? '（AI 生成）' : ''}</h4>
           <p>{ai.data?.sections[k] || card?.[k]}</p>
