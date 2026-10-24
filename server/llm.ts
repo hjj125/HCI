@@ -36,7 +36,7 @@ export async function callDeepSeek(region: string, continent: string, apiKey: st
       model,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `请介绍地理区域：${region}（${continent}）。围绕区位、地形地貌、人文特征三个板块，强调它们之间的联系。` },
+        { role: 'user', content: `请介绍「${region}」这一区域本身（它位于${continent}，大洲信息仅作背景，不要转而介绍整个大洲）。围绕区位、地形地貌、人文特征三个板块，强调它们之间的联系。` },
       ],
       temperature: 0.7, max_tokens: 600,
     }),
