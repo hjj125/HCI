@@ -1,7 +1,7 @@
-﻿export type SceneId = 'slides' | 'whiteboard' | 'geometry';
+﻿export type SceneId = 'slides' | 'whiteboard' | 'geometry' | 'physics';
 export type InteractionEvent = {
   scene: SceneId; source: 'mouse' | 'hand' | 'keyboard' | 'voice' | 'system';
-  intent: 'point' | 'drag' | 'next' | 'previous' | 'undo' | 'reset' | 'switch' | 'predict' | 'hint' | 'submit' | 'laser';
+  intent: 'point' | 'drag' | 'next' | 'previous' | 'undo' | 'reset' | 'switch' | 'predict' | 'hint' | 'submit' | 'laser' | 'run' | 'pause';
   phase: 'start' | 'update' | 'end' | 'cancel';
   position?: { x: number; y: number }; value?: string;
 };
@@ -23,12 +23,13 @@ export function numberToolPose(fingers: [boolean, boolean, boolean, boolean]): '
   return null;
 }
 /** 语音命令：识别短语 → 统一交互事件意图。破坏性操作（清空等）不设语音入口。 */
-export type VoiceIntent = { intent: 'next' | 'previous' | 'undo' | 'reset' | 'hint' | 'laser' | 'voice-off' | 'switch'; value?: SceneId };
+export type VoiceIntent = { intent: 'next' | 'previous' | 'undo' | 'reset' | 'hint' | 'laser' | 'run' | 'pause' | 'voice-off' | 'switch'; value?: SceneId };
 const VOICE_RULES: readonly (readonly [string, VoiceIntent])[] = [
   ['关闭语音', { intent: 'voice-off' }], ['停止语音', { intent: 'voice-off' }],
   ['下一页', { intent: 'next' }], ['上一页', { intent: 'previous' }],
-  ['白板', { intent: 'switch', value: 'whiteboard' }], ['课件', { intent: 'switch', value: 'slides' }], ['几何', { intent: 'switch', value: 'geometry' }],
+  ['白板', { intent: 'switch', value: 'whiteboard' }], ['课件', { intent: 'switch', value: 'slides' }], ['几何', { intent: 'switch', value: 'geometry' }], ['物理', { intent: 'switch', value: 'physics' }],
   ['撤销', { intent: 'undo' }], ['重置', { intent: 'reset' }], ['提示', { intent: 'hint' }], ['激光笔', { intent: 'laser' }],
+  ['开始', { intent: 'run' }], ['暂停', { intent: 'pause' }],
 ];
 export function matchVoiceCommand(text: string): VoiceIntent | null {
   const t = text.replace(/\s/g, '');

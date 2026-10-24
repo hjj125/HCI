@@ -77,7 +77,7 @@ export function GeometryScene({ active }: SceneProps) {
       if (e.phase === 'end') {
         // 初始参数先取出再进更新器：更新器延迟执行时 drag.current 已被置空（回归修复）。
         const initial = drag.current?.scene === 'geometry' ? drag.current.initial : undefined;
-        if (initial) setHistory(v => [...v, initial].slice(-30));
+        if (initial) setHistory(v => [...v, initial as { az: number; el: number; offset: number }].slice(-30));
         drag.current = null;
         return;
       }

@@ -11,7 +11,7 @@ import type { SceneId } from './interaction';
  * - drag：跨场景共享的拖拽会话（谁在拖、从哪个参数出发）
  * 场景只通过这些接口与平台交互，不直接触碰摄像头或其他场景。
  */
-export type DragSession = { scene: SceneId; initial?: { az: number; el: number; offset: number }; x: number; y: number } | null;
+export type DragSession = { scene: SceneId; initial?: Record<string, number>; x: number; y: number } | null;
 export type AppServices = {
   notify: (message: string) => void;
   cancelHand: () => void;

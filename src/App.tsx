@@ -106,11 +106,13 @@ export default function App() {
   }, [mode, hand.cancel, hand.stop]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportLogs = () => {
-    const geometry = snapshots.current.get('geometry')?.() ?? {};
-    const whiteboard = snapshots.current.get('whiteboard')?.() ?? {};
+    // 各场景提供会话快照（对应插件契约 get_world_state）；激活场景的数据置于顶层。
+    const all: Record<string, unknown> = {};
+    snapshots.current.forEach((get, id) => { all[id] = get(); });
+    const activeSession = (all[mode] as Record<string, unknown> | undefined) ?? {};
     const data = {
       version: 2, exported: new Date().toISOString(),
-      cameraUsed: hand.enabled, penInput, ...whiteboard, ...geometry,
+      cameraUsed: hand.enabled, penInput, ...activeSession, scenes: all,
       events: [...events].reverse(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
