@@ -6,7 +6,7 @@ export type Vec2 = [number, number];
 export type Body = { x: number; y: number; vx: number; vy: number };
 export type Force = { magnitude: number; angle: number }; // 角度为世界系度数，0=向右、90=向上
 
-export const MAX_FORCE = 10;
+export const MAX_FORCE = 4;
 
 /** 单步推进。半隐式欧拉对恒力速度更新精确，长期积分稳定。 */
 export function step(body: Body, force: Force, dt: number, mass = 1): Body {

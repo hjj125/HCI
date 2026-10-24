@@ -10,13 +10,14 @@ const HINTS = [
   '把力拖到与运动方向垂直试试：轨迹弯曲，而短时间内速率几乎不变。',
   '任务 A：不施力时速度保持不变（牛顿第一定律）。任务 B：先朝目标施力，途中再调整方向“刹车”。',
 ];
-const INITIAL: Body = { x: 3, y: 5, vx: 2, vy: 0 };
+const INITIAL: Body = { x: 3, y: 5, vx: 1.5, vy: 0 };
+const REST: Body = { x: 3, y: 5, vx: 0, vy: 0 };
 const DEFAULT_FORCE: Force = { magnitude: 0, angle: 90 };
 const TARGET = { x: 15, y: 8, r: 1 };
 const TASK_A_SECONDS = 5, TASK_B_SECONDS = 20;
 const PREDICTIONS = [
   { id: 'stop', text: '逐渐慢下来，最后停止' },
-  { id: 'keep', text: '保持 2 m/s 向右匀速直行' },
+  { id: 'keep', text: '保持 1.5 m/s 向右匀速直行' },
   { id: 'faster', text: '越来越快' },
 ];
 type Snap = { label: string; trail: Vec2[]; finalSpeed: number; displacement: number };
@@ -54,12 +55,14 @@ export function PhysicsScene({ active }: SceneProps) {
     if (!keepForce) setForce(DEFAULT_FORCE);
   };
 
-  // 仿真循环：固定步长推进，任务 A/B 有时限，出界自动暂停。
+  // 仿真循环：固定步长推进，任务 A/B 有时限，出可见观测区即停。
+  // 用 setInterval 而非 requestAnimationFrame 驱动：页面被遮挡时渲染器会冻结 rAF
+  // （visibilityState 仍为 visible），仿真会无声停摆；定时器不受渲染节流影响。
   useEffect(() => {
     if (!running) return;
-    let raf = 0, last = performance.now(), acc = 0;
-    const tick = (now: number) => {
-      acc += Math.min(now - last, 100); last = now;
+    let last = performance.now(), acc = 0;
+    const timer = setInterval(() => {
+      acc += Math.min(performance.now() - last, 100); last = performance.now();
       while (acc >= 16.6) {
         acc -= 16.6;
         const s = live.current;
@@ -67,7 +70,7 @@ export function PhysicsScene({ active }: SceneProps) {
         runSeconds.current += 1 / 60;
         setBody(next);
         setTrail(t => (t.length > 4000 ? t : [...t, [next.x, next.y]]));
-        const out = Math.abs(next.x) > 40 || Math.abs(next.y) > 40;
+        const out = next.x < -0.8 || next.x > 20.8 || next.y < -0.8 || next.y > 10.8; // 出可见观测区即停
         const hit = s.task === 'B' && inTarget(next, TARGET);
         const timeUp = s.task === 'A' ? runSeconds.current >= TASK_A_SECONDS : s.task === 'B' ? runSeconds.current >= TASK_B_SECONDS : false;
         if (hit) {
@@ -77,17 +80,15 @@ export function PhysicsScene({ active }: SceneProps) {
           setRunning(false);
           if (s.task === 'A') {
             const v = speed(next);
-            const verdict = Math.abs(v - 2) < 0.01 && Math.abs(next.y - 5) < 0.01 && next.vx > 0
+            const verdict = Math.abs(v - INITIAL.vx) < 0.01 && Math.abs(next.y - INITIAL.y) < 0.01 && next.vx > 0
               ? `实际结果：5 秒后仍以 ${v.toFixed(2)} m/s 向右匀速前进，位置 x=${next.x.toFixed(1)} m。`
               : `实际结果：末速率 ${v.toFixed(2)} m/s。`;
             setObserved(verdict + (prediction === 'keep' ? ' 你的预测正确！' : ' 预测与观察不同——这正是值得讨论的直觉。'));
-          } else notify(out ? '探测器飞出观测区，已暂停。调整力矢量后重新开始。' : '时间到，已暂停。调整力矢量后可重新开始。');
+          } else notify(out ? '探测器到达观测区边缘，已暂停。调整力矢量后重新开始。' : '时间到，已暂停。调整力矢量后可重新开始。');
         }
       }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    }, 16);
+    return () => clearInterval(timer);
   }, [running, prediction, notify]);
 
   // 世界坐标 ↔ 画布坐标（世界 22×13 m 视野，中心 (10,5)）。
@@ -96,33 +97,46 @@ export function PhysicsScene({ active }: SceneProps) {
     const scale = Math.min(c.width / 22, c.height / 13);
     return { c, scale, ox: c.width / 2, oy: c.height / 2 };
   };
-  const headScreen = () => {
+  /** 力矢量头部：画布内部坐标（用于绘制）与视口坐标（用于手势命中判定）。 */
+  const headCanvas = () => {
     const { scale, ox, oy } = view();
-    const rad = (force.angle * Math.PI) / 180, len = 1.2 + force.magnitude * scale * 0.16;
+    const rad = (force.angle * Math.PI) / 180, len = 1.2 + force.magnitude * scale * 0.45;
     return { x: ox + (body.x - 10) * scale + Math.cos(rad) * len, y: oy - (body.y - 5) * scale - Math.sin(rad) * len };
+  };
+  const headViewport = () => {
+    const c = canvas.current; if (!c) return null;
+    const r = c.getBoundingClientRect();
+    const h = headCanvas();
+    return { x: r.left + (h.x * r.width) / c.width, y: r.top + (h.y * r.height) / c.height, r };
   };
 
   // 手势策略：捏合力矢量箭头头部拖动 = 同时改变力的大小与方向（任务 A 中力固定为零）。
+  // 命中判定在视口坐标系进行；事件位置统一换算为画布归一化坐标。
   useScenePolicy('physics', sample => {
     if (sample.phase === 'cancel') { bus.emit({ scene: 'physics', source: 'hand', intent: 'drag', phase: 'cancel' }); return; }
     if (task === 'A') return;
     const px = sample.x * window.innerWidth, py = sample.y * window.innerHeight;
-    const head = headScreen();
-    const near = Math.hypot(px - head.x, py - head.y) < 48;
+    const head = headViewport(); if (!head) return;
+    const toCanvas = (x: number, y: number) => ({ x: (x - head.r.left) / head.r.width, y: (y - head.r.top) / head.r.height });
     if (sample.phase === 'start') {
-      if (near) bus.emit({ scene: 'physics', source: 'hand', intent: 'drag', phase: 'start', position: { x: sample.x, y: sample.y } });
+      if (Math.hypot(px - head.x, py - head.y) < 52)
+        bus.emit({ scene: 'physics', source: 'hand', intent: 'drag', phase: 'start', position: toCanvas(px, py) });
       return;
     }
     if (drag.current?.scene === 'physics' && sample.phase === 'end') { bus.emit({ scene: 'physics', source: 'hand', intent: 'drag', phase: 'end' }); return; }
-    if (drag.current?.scene === 'physics' && sample.pinching)
-      bus.emit({ scene: 'physics', source: 'hand', intent: 'drag', phase: 'update', position: { x: sample.x, y: sample.y } });
+    if (drag.current?.scene === 'physics' && sample.pinching) {
+      const p = toCanvas(px, py);
+      bus.emit({ scene: 'physics', source: 'hand', intent: 'drag', phase: 'update', position: p });
+    }
   });
 
-  // 指针（手势/鼠标）→ 力矢量：以物体为原点，指向指针的方向=力方向，距离=大小。
-  const pointerToForce = (px: number, py: number) => {
+  // 指针（手势/鼠标，画布归一化坐标）→ 力矢量：以物体为原点，指向=方向，距离=大小。
+  const pointerToForce = (nx: number, ny: number) => {
+    const c = canvas.current!;
     const { scale, ox, oy } = view();
+    const px = nx * c.width, py = ny * c.height;
     const bx = ox + (body.x - 10) * scale, by = oy - (body.y - 5) * scale;
-    return clampForce(Math.hypot(px - bx, py - by) / (scale * 0.16), Math.atan2(by - py, px - bx) * 180 / Math.PI);
+    return clampForce(Math.hypot(px - bx, py - by) / (scale * 0.45), Math.atan2(by - py, px - bx) * 180 / Math.PI);
   };
 
   useEffect(() => bus.subscribe(e => {
@@ -134,7 +148,7 @@ export function PhysicsScene({ active }: SceneProps) {
       }
       if (e.phase === 'start') { drag.current = { scene: 'physics', initial: { ...force }, x: 0, y: 0 }; return; }
       if (e.phase === 'update' && drag.current?.scene === 'physics' && e.position)
-        setForce(pointerToForce(e.position.x * window.innerWidth, e.position.y * window.innerHeight));
+        setForce(pointerToForce(e.position.x, e.position.y));
       if (e.phase === 'end' && drag.current?.scene === 'physics') {
         const before = drag.current.initial;
         if (before) setHistory(v => [...v, { magnitude: before.magnitude, angle: before.angle }].slice(-30));
@@ -145,7 +159,8 @@ export function PhysicsScene({ active }: SceneProps) {
     if (e.scene !== 'physics') return;
     if (e.intent === 'run') {
       if (task === 'A' && !submitted) { notify('任务 A：先提交预测，再运行验证。'); return; }
-      runSeconds.current = 0; setBody(INITIAL); setTrail([[INITIAL.x, INITIAL.y]]); setObserved(null); setCompleted(false); setRunning(true);
+      const start = task === 'B' ? REST : INITIAL;
+      runSeconds.current = 0; setBody(start); setTrail([[start.x, start.y]]); setObserved(null); setCompleted(false); setRunning(true);
     }
     if (e.intent === 'pause') setRunning(false);
     if (e.intent === 'reset') {
@@ -215,7 +230,7 @@ export function PhysicsScene({ active }: SceneProps) {
       ctx.font = 'bold 13px sans-serif'; ctx.fillText(label, x2 + 6, y2 - 6);
     };
     const bx = W(body.x), by = H(body.y);
-    if (task !== 'A' || force.magnitude > 0) arrow({ x: bx, y: by }, force.angle, 1.2 + force.magnitude * scale * 0.16, '#ff5a5a', `F=${force.magnitude.toFixed(1)}N`);
+    if (task !== 'A' || force.magnitude > 0) arrow({ x: bx, y: by }, force.angle, 1.2 + force.magnitude * scale * 0.45, '#ff5a5a', `F=${force.magnitude.toFixed(1)}N`);
     const v = speed(body);
     if (v > 0.01) arrow({ x: bx, y: by }, Math.atan2(body.vy, body.vx) * 180 / Math.PI, 1.2 + v * scale * 0.32, '#6ee7a0', `v=${v.toFixed(1)}`);
     ctx.fillStyle = '#e5edf7'; ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
@@ -242,7 +257,7 @@ export function PhysicsScene({ active }: SceneProps) {
       <button className={task === 'C' ? 'selected' : ''} onClick={() => { setTask('C'); emit('reset'); }}>任务 C · 轨迹对比</button>
     </div>
     <div className="task-card">{task === 'free' ? '教师演示：拖动红色力矢量改变大小与方向，点击开始观察速度（绿）如何响应；不施力时保持匀速直行。'
-      : task === 'A' ? '探测器正以 2 m/s 向右匀速航行，本任务中力恒为零。预测：5 秒后它会怎样？提交后运行验证。'
+      : task === 'A' ? '探测器正以 1.5 m/s 向右匀速航行，本任务中力恒为零。预测：5 秒后它会怎样？提交后运行验证。'
       : task === 'B' ? `探测器从静止出发（初速 0）。目标：调整力矢量，让它在 ${TASK_B_SECONDS} 秒内进入琥珀色目标区（半径 1 m）。`
       : '用不同施力方案各跑一次，保存两条轨迹并排比较，解释力如何造成差异。'}</div>
     <div className="slide-controls" style={{ marginTop: 14 }}>
@@ -254,9 +269,9 @@ export function PhysicsScene({ active }: SceneProps) {
     <canvas ref={canvas} width={960} height={560} aria-label="力与运动仿真视图"
       onPointerDown={e => {
         if (task === 'A') return;
-        const head = headScreen(), r = e.currentTarget.getBoundingClientRect();
+        const head = headCanvas(), r = e.currentTarget.getBoundingClientRect();
         const px = e.clientX - r.left, py = e.clientY - r.top;
-        if (Math.hypot(px - head.x * (r.width / e.currentTarget.width), py - head.y * (r.height / e.currentTarget.height)) < 40)
+        if (Math.hypot(px - (head.x * r.width) / e.currentTarget.width, py - (head.y * r.height) / e.currentTarget.height) < 40)
           bus.emit({ scene: 'physics', source: 'mouse', intent: 'drag', phase: 'start', position: { x: px / r.width, y: py / r.height } });
       }}
       onPointerMove={e => {

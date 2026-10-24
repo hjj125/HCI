@@ -36,6 +36,6 @@ describe('力与运动仿真（物理正确性）', () => {
   it('目标判定与力上限约束', () => {
     expect(inTarget({ x: 3, y: 4, vx: 0, vy: 0 }, { x: 3, y: 4, r: 1 })).toBe(true);
     expect(inTarget({ x: 5, y: 4, vx: 0, vy: 0 }, { x: 3, y: 4, r: 1 })).toBe(false);
-    expect(clampForce(99, -90)).toEqual({ magnitude: 10, angle: 270 });
+    expect(clampForce(99, -90)).toEqual({ magnitude: 4, angle: 270 });
   });
 });
