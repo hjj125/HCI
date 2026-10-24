@@ -5,7 +5,7 @@ import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSnapshot, useServices } from '../../core/services';
 import { latLonToVector3, vector3ToLatLon, findRegion, type RegionFeature } from './geoMath';
 import { loadWorld, regionName, cardFor, CLUES } from './regionData';
-import { explainRegion, getLlmConfig, saveLlmConfig, type Explanation } from './llm';
+import { explainRegion, type Explanation } from './llm';
 
 type Selection = { name: string; zh: string; lat: number; lon: number; continent: string };
 type World = {
@@ -32,7 +32,6 @@ export function GeographyScene({ active }: SceneProps) {
   const [started, setStarted] = useState(Date.now());
   const [stalled, setStalled] = useState(false);
   const [ai, setAi] = useState<{ loading: boolean; data: Explanation | null }>({ loading: false, data: null });
-  const [llm, setLlm] = useState(() => getLlmConfig() ?? { baseUrl: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat' });
   const lastActivity = useRef(Date.now());
   const host = useRef<HTMLDivElement>(null);
   const world = useRef<World | null>(null);
@@ -248,11 +247,12 @@ export function GeographyScene({ active }: SceneProps) {
   const card = selected ? cardFor({ properties: { NAME: selected.name, CONTINENT: selected.continent }, geometry: { type: 'Polygon', coordinates: [] } }) : null;
   const runAi = async () => {
     if (!selected) return;
-    if (!getLlmConfig()) { notify('AI 讲解未配置：在下方填入 DeepSeek API Key 后保存。'); return; }
     setAi({ loading: true, data: null });
-    const data = await explainRegion(selected.zh, selected.continent);
+    const { data, reason } = await explainRegion(selected.zh, selected.continent);
     setAi({ loading: false, data });
-    notify(data ? 'AI 讲解已生成（AI 生成内容仅供参考）。' : 'AI 讲解不可用（配置或网络问题），已显示内置资料卡。');
+    notify(reason === 'unconfigured'
+      ? 'AI 讲解未配置：请在项目根目录 .env 填入 DEEPSEEK_API_KEY 并重启服务（详见 README），已显示内置资料卡。'
+      : data ? 'AI 讲解已生成（AI 生成内容仅供参考）。' : 'AI 讲解不可用（网络或服务问题），已显示内置资料卡。');
   };
 
   return <section className="panel geo-panel" hidden={!active}>
@@ -304,16 +304,7 @@ export function GeographyScene({ active }: SceneProps) {
           <button onClick={() => void runAi()} disabled={ai.loading}>{ai.loading ? '生成中…' : 'AI 生成讲解'}</button>
           <button onClick={() => setRegionView(false)}>返回地球</button>
         </div>
-        <details className="help" style={{ marginTop: 12 }}>
-          <summary>AI 讲解设置（DeepSeek）</summary>
-          <div className="ai-config">
-            <label>接口地址<input value={llm.baseUrl} onChange={e => setLlm({ ...llm, baseUrl: e.target.value })} /></label>
-            <label>模型<input value={llm.model} onChange={e => setLlm({ ...llm, model: e.target.value })} /></label>
-            <label>API Key<input type="password" value={llm.apiKey} placeholder="sk-…" onChange={e => setLlm({ ...llm, apiKey: e.target.value })} /></label>
-            <button onClick={() => { saveLlmConfig(llm); notify('AI 配置已保存（仅存本机浏览器）。'); }}>保存配置</button>
-          </div>
-          <p>key 只保存在本机浏览器；请求仅发送区域名称，不涉及摄像头或日志数据。无 key 时使用内置资料卡。</p>
-        </details>
+
       </div>}
     </div>
     <aside className="side" style={{ marginTop: 16 }}>
