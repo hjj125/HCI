@@ -45,6 +45,19 @@ describe('数字地球手势', () => {
     await waitFor(() => expect(notice()).toContain('已识别向右挥手 · 地球向右旋转'));
   });
 
+  it('向下挥动给俯仰冲量并提示转向北半球', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+    // 垂直挥手：y 从 0.35 → 0.75（屏幕坐标向下）
+    const steps = 8, gap = 35;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      act(() => hand.emit!({ x: 0.5, y: 0.35 + 0.4 * t, phase: 'update', pinching: false }));
+      await sleep(gap);
+    }
+    await waitFor(() => expect(notice()).toContain('已识别向下挥手 · 视角转向北半球'));
+  });
+
   it('双手张合样本与张开手掌悬停不导致崩溃（缩放在 WebGL 不可用时安全跳过）', async () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));

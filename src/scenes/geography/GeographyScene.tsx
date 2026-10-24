@@ -5,7 +5,7 @@ import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSnapshot, useServices } from '../../core/services';
 import { latLonToVector3, vector3ToLatLon, findRegion, type RegionFeature } from './geoMath';
 import { loadWorld, regionName, cardFor, CLUES } from './regionData';
-import { SwipeDetector } from '../slides/pptGesture';
+import { SwipeDetector, VerticalSwipeDetector } from '../slides/pptGesture';
 import { streamRegionChat, type ChatMessage } from './llm';
 
 type Selection = { name: string; zh: string; lat: number; lon: number; continent: string };
@@ -40,8 +40,10 @@ export function GeographyScene({ active }: SceneProps) {
   const lastActivity = useRef(Date.now());
   // 惯性旋转（挥手冲量驱动）、张开手掌悬停刹车、双手张合缩放、挥手判定。
   const spinVel = useRef(0);
+  const pitchVel = useRef(0);
   const brake = useRef(false);
   const swipe = useRef(new SwipeDetector());
+  const swipeV = useRef(new VerticalSwipeDetector());
   const twoHandsDist = useRef<number | null>(null);
   const palmHold = useRef<{ since: number; x: number; y: number } | null>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -123,12 +125,15 @@ export function GeographyScene({ active }: SceneProps) {
       frame = requestAnimationFrame(tick);
       const now = performance.now(), dt = Math.min((now - prev) / 1000, 0.05); prev = now;
       clouds.rotation.y += 0.0004;                       // 云层缓慢自转
-      // 惯性旋转：挥手给角速度冲量，松手滑行；张开手掌悬停时强力刹车。
+      // 惯性旋转：挥手给角速度冲量（水平=自转，竖直=俯仰），松手滑行；张开手掌悬停时强力刹车。
       earthGroup.rotation.y += spinVel.current * dt;
+      earthGroup.rotation.x = Math.max(-1.25, Math.min(1.25, earthGroup.rotation.x + pitchVel.current * dt));
+      if (Math.abs(earthGroup.rotation.x) >= 1.25) pitchVel.current = 0;  // 到达俯仰限位即停
       spinVel.current *= brake.current ? 0.78 : 0.985;
+      pitchVel.current *= brake.current ? 0.78 : 0.985;
       if (Math.abs(spinVel.current) < 0.0008) spinVel.current = 0;
+      if (Math.abs(pitchVel.current) < 0.0008) pitchVel.current = 0;
       brake.current = false;
-      earthGroup.rotation.x *= 0.98;                     // 轻微回正，避免极端俯仰
       renderer.render(scene, camera);
     };
     tick();
@@ -193,7 +198,7 @@ export function GeographyScene({ active }: SceneProps) {
 
   // 手势策略：挥手旋转（带惯性）/ 张掌悬停刹车 / 双手张合缩放 / 捏合拖动 / 捏合点击选区。
   useScenePolicy('geography', sample => {
-    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); twoHandsDist.current = null; palmHold.current = null; return; }
+    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; return; }
     // 双手张合 → 缩放：双手距离增大=放大（靠近），减小=缩小。
     if (sample.hands && sample.hands.length >= 2) {
       const d = Math.hypot(sample.hands[0].x - sample.hands[1].x, sample.hands[0].y - sample.hands[1].y);
@@ -216,7 +221,12 @@ export function GeographyScene({ active }: SceneProps) {
         spinVel.current = Math.max(-1.6, Math.min(1.6, spinVel.current + (dir === 'right' ? 0.85 : -0.85)));
         notify(dir === 'right' ? '已识别向右挥手 · 地球向右旋转（张开手掌悬停可停）' : '已识别向左挥手 · 地球向左旋转（张开手掌悬停可停）');
       }
-    } else swipe.current.reset();
+      const vdir = swipeV.current.push(sample.x, sample.y, performance.now(), { pinching: false });
+      if (vdir) {
+        pitchVel.current = Math.max(-1.2, Math.min(1.2, pitchVel.current + (vdir === 'down' ? 0.6 : -0.6)));
+        notify(vdir === 'down' ? '已识别向下挥手 · 视角转向北半球' : '已识别向上挥手 · 视角转向南半球');
+      }
+    } else { swipe.current.reset(); swipeV.current.reset(); }
     if (live.current.mode === 'rotate') {
       if (sample.phase === 'start') { drag.current = { scene: 'geography', x: sample.x, y: sample.y }; return; }
       if (drag.current?.scene === 'geography' && sample.pinching) {
@@ -329,7 +339,7 @@ export function GeographyScene({ active }: SceneProps) {
       <button onClick={() => zoom(-0.35)}>放大 +</button>
       <button onClick={() => zoom(0.35)}>缩小 −</button>
       <label className="small"><input type="checkbox" checked={graticule} onChange={e => setGraticule(e.target.checked)} /> 经纬网</label>
-      <span className="help">{mode === 'rotate' ? '挥动单手旋转地球（有惯性，张开手掌悬停≈刹车）；双手张合缩放；捏合拖动微调（滚轮缩放）' : '指向区域后捏合“点击”即可选中（鼠标单击）；挥手旋转与双手缩放同样可用'}</span>
+      <span className="help">{mode === 'rotate' ? '左右挥动=地球自转，上下挥动=俯仰视角（下挥看北半球、上挥看南半球），有惯性；张开手掌悬停≈刹车；双手张合缩放；捏合拖动微调（滚轮缩放）' : '指向区域后捏合“点击”即可选中（鼠标单击）；挥手旋转与双手缩放同样可用'}</span>
     </div>
     <div className="geo-host" ref={host}
       onPointerDown={e => {

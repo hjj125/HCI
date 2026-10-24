@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectSwipe, SwipeDetector, type SwipeDirection } from './pptGesture';
+import { detectSwipe, SwipeDetector, detectVerticalSwipe, VerticalSwipeDetector, type SwipeDirection } from './pptGesture';
 
 type P = { x: number; y: number; time: number };
 const sweep = (from: number, to: number, ms = 300, steps = 7, y0 = 0.5, y1 = 0.5): P[] =>
@@ -81,5 +81,32 @@ describe('挥手检测器', () => {
     let hit: SwipeDirection | null = null;
     for (const p of second) hit = detector.push(p.x, p.y, p.time) ?? hit;
     expect(hit).toBeNull();
+  });
+});
+
+describe('竖直挥手判定', () => {
+  const sweepV = (from: number, to: number, ms = 300, steps = 7, x0 = 0.5, x1 = 0.5): { x: number; y: number; time: number }[] =>
+    Array.from({ length: steps }, (_, i) => {
+      const t = i / (steps - 1);
+      return { x: x0 + (x1 - x0) * t, y: from + (to - from) * t, time: 1000 + ms * t };
+    });
+  it('向下/向上快速划过分别识别为 down / up', () => {
+    expect(detectVerticalSwipe(sweepV(0.4, 0.75))).toBe('down');
+    expect(detectVerticalSwipe(sweepV(0.7, 0.35))).toBe('up');
+  });
+  it('幅度太小或明显斜向移动不触发', () => {
+    expect(detectVerticalSwipe(sweepV(0.4, 0.5))).toBeNull();       // 太短
+    expect(detectVerticalSwipe(sweepV(0.4, 0.75, 300, 7, 0.4, 0.75))).toBeNull(); // 斜向
+  });
+  it('冷却期内不重复触发', () => {
+    const d = new VerticalSwipeDetector();
+    const pts = sweepV(0.4, 0.75);
+    let hit = null as string | null;
+    for (const p of pts) hit = d.push(p.x, p.y, p.time) ?? hit;
+    expect(hit).toBe('down');
+    const pts2 = sweepV(0.4, 0.75).map(p => ({ ...p, time: p.time + 400 }));
+    let hit2 = null as string | null;
+    for (const p of pts2) hit2 = d.push(p.x, p.y, p.time) ?? hit2;
+    expect(hit2).toBeNull();
   });
 });
