@@ -1,52 +1,61 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { createLlmMiddleware } from './llm';
+import { createLlmMiddleware, type ChatMessage } from './llm';
 
 function call(middleware: ReturnType<typeof createLlmMiddleware>, options: { host?: string; origin?: string; token?: string; body?: string; path?: string } = {}) {
+  const writes: string[] = [];
   const req = Object.assign(new EventEmitter(), {
-    url: `/api/llm${options.path ?? '/explain'}`, method: 'POST',
+    url: `/api/llm${options.path ?? '/chat'}`, method: 'POST',
     headers: { host: options.host ?? '127.0.0.1:5173', origin: options.origin ?? 'http://127.0.0.1:5173', 'x-embodiededu': options.token ?? 'local-control' },
     async *[Symbol.asyncIterator]() { if (options.body) yield Buffer.from(options.body); },
   });
-  const res: any = { statusCode: 0, setHeader: () => {}, end: (v: string) => { res.body = v; } };
-  return middleware(req as any, res).then(() => ({ status: res.statusCode, body: JSON.parse(res.body) }));
+  const res: any = {
+    statusCode: 0, headers: {},
+    setHeader: (k: string, v: string) => { res.headers[k] = v; },
+    write: (c: string) => { writes.push(c); },
+    end: (v?: string) => { if (v) res.body = v; res.writes = writes; },
+  };
+  return middleware(req as any, res).then(() => ({ status: res.statusCode, body: res.body ? JSON.parse(res.body) : null, stream: writes.join(''), headers: res.headers }));
 }
 
-const okCall = vi.fn(async (): Promise<any> => ({ sections: { 区位: '位于东亚', 地形地貌: '西高东低', 人文特征: '人口稠密' }, question: '地形如何影响人口分布？' }));
+async function* fakeStream(): AsyncGenerator<string> { yield '你好，'; yield '这里是测试讲解。'; }
 
-describe('AI 讲解接口安全与行为', () => {
-  it('本机来源请求返回讲解结果', async () => {
-    const r = await call(createLlmMiddleware(okCall as any, { apiKey: 'test-key' }), { body: JSON.stringify({ region: '中国', continent: 'Asia' }) });
+describe('AI 对话接口（流式）安全与行为', () => {
+  const opts = { apiKey: 'test-key' };
+  const body = JSON.stringify({ region: '中国', continent: 'Asia', messages: [{ role: 'user', content: '请介绍' }] as ChatMessage[] });
+  it('本机请求返回 SSE 流：逐段增量 + [DONE]', async () => {
+    const r = await call(createLlmMiddleware(() => fakeStream(), opts), { body });
     expect(r.status).toBe(200);
-    expect(r.body.sections.区位).toBe('位于东亚');
-    expect(okCall).toHaveBeenCalledWith('中国', 'Asia', expect.any(String));
+    expect(r.headers['Content-Type']).toContain('text/event-stream');
+    expect(r.stream).toContain('data: {"delta":"你好，"}');
+    expect(r.stream).toContain('data: {"delta":"这里是测试讲解。"}');
+    expect(r.stream.trimEnd().endsWith('data: [DONE]')).toBe(true);
   });
-  it('拒绝远端主机与跨源请求（key 不能被第三方页面借用）', async () => {
-    expect((await call(createLlmMiddleware(), { host: 'evil.example' })).status).toBe(403);
-    expect((await call(createLlmMiddleware(), { origin: 'http://evil.example' })).status).toBe(403);
-    expect((await call(createLlmMiddleware(), { token: '' })).status).toBe(403);
+  it('拒绝远端主机 / 跨源 / 缺自定义头（key 不可被第三方借用）', async () => {
+    expect((await call(createLlmMiddleware(() => fakeStream(), opts), { host: 'evil.example' })).status).toBe(403);
+    expect((await call(createLlmMiddleware(() => fakeStream(), opts), { origin: 'http://evil.example' })).status).toBe(403);
+    expect((await call(createLlmMiddleware(() => fakeStream(), opts), { token: '' })).status).toBe(403);
   });
-  it('无效路径与缺区域返回 400', async () => {
-    expect((await call(createLlmMiddleware(), { path: '/other' })).status).toBe(400);
-    expect((await call(createLlmMiddleware(okCall as any, { apiKey: 'test-key' }), { body: '{}' })).status).toBe(400);
+  it('无效路径与缺内容返回 400', async () => {
+    expect((await call(createLlmMiddleware(() => fakeStream(), opts), { path: '/other', body })).status).toBe(400);
+    expect((await call(createLlmMiddleware(() => fakeStream(), opts), { body: JSON.stringify({ region: 'x', messages: [] }) })).status).toBe(400);
   });
-  it('未配置 key 时返回 503 且不调用上游', async () => {
-    const r = await call(createLlmMiddleware(okCall as any, { apiKey: 'test-key' }), { body: JSON.stringify({ region: 'x', continent: 'y' }) });
-    // CI 环境通常无 .env：若未配置应得到 503；若本机恰好配置了 key 则应成功
-    if (r.status === 503) { expect(r.body.configured).toBe(false); expect(okCall).not.toHaveBeenCalled(); }
-    else expect(r.status).toBe(200);
+  it('未配置 key 返回 503 且不触达上游', async () => {
+    const upstream = vi.fn(() => fakeStream());
+    const r = await call(createLlmMiddleware(upstream as any, { apiKey: '' }), { body });
+    if (r.status === 200) return; // 本机 .env 已配置时（读取真实 key）跳过
+    expect(r.status).toBe(503);
+    expect(r.body.configured).toBe(false);
+    expect(upstream).not.toHaveBeenCalled();
   });
-  it('上游失败返回 502', async () => {
-    const fail = vi.fn(async () => null);
-    const r = await call(createLlmMiddleware(fail, { apiKey: 'test-key' }), { body: JSON.stringify({ region: 'a', continent: 'b' }) });
-    expect(r.status).toBe(502);
+  it('快速连续请求触发限流 429', async () => {
+    const m = createLlmMiddleware(() => fakeStream(), opts);
+    expect((await call(m, { body })).status).toBe(200);
+    expect((await call(m, { body })).status).toBe(429); // 0.8 秒冷却
   });
-  it('连续快速请求触发限流 429', async () => {
-    const slow = vi.fn(async () => ({ sections: { 区位: 'x', 地形地貌: 'y', 人文特征: 'z' }, question: 'q' }));
-    const m = createLlmMiddleware(slow as any, { apiKey: 'test-key' });
-    const first = await call(m, { body: JSON.stringify({ region: 'a', continent: 'b' }) });
-    expect(first.status).toBe(200);
-    const second = await call(m, { body: JSON.stringify({ region: 'a', continent: 'b' }) });
-    expect(second.status).toBe(429); // 1.5 秒冷却
+  it('上游异常时流内返回错误事件', async () => {
+    async function* boom() { yield '开头'; throw new Error('upstream down'); }
+    const r = await call(createLlmMiddleware(boom, opts), { body });
+    expect(r.stream).toContain('生成中断');
   });
 });

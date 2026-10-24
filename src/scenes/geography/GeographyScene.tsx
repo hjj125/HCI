@@ -5,7 +5,7 @@ import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSnapshot, useServices } from '../../core/services';
 import { latLonToVector3, vector3ToLatLon, findRegion, type RegionFeature } from './geoMath';
 import { loadWorld, regionName, cardFor, CLUES } from './regionData';
-import { explainRegion, type Explanation } from './llm';
+import { streamRegionChat, type ChatMessage } from './llm';
 
 type Selection = { name: string; zh: string; lat: number; lon: number; continent: string };
 type World = {
@@ -31,7 +31,11 @@ export function GeographyScene({ active }: SceneProps) {
   const [hint, setHint] = useState(0);
   const [started, setStarted] = useState(Date.now());
   const [stalled, setStalled] = useState(false);
-  const [ai, setAi] = useState<{ loading: boolean; data: Explanation | null }>({ loading: false, data: null });
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [chatView, setChatView] = useState(false);
+  const [input, setInput] = useState('');
+  const chatScroll = useRef<HTMLDivElement>(null);
   const lastActivity = useRef(Date.now());
   const host = useRef<HTMLDivElement>(null);
   const world = useRef<World | null>(null);
@@ -209,7 +213,7 @@ export function GeographyScene({ active }: SceneProps) {
     if (e.intent === 'reset') {
       // 任务切换按钮会先 setTask 再 emit reset：这里不重置 task，只清作答状态。
       setMode('rotate'); setSelected(null); setRegionView(false); setAnswerState('none'); setAnswerRegion('');
-      setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setAi({ loading: false, data: null });
+      setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setChat([]); setChatView(false); setInput(''); setStreaming(false);
     }
     if (e.intent === 'predict') {
       const target = clue.target;
@@ -242,18 +246,30 @@ export function GeographyScene({ active }: SceneProps) {
     task, mode, hints: hint, explanation, completed,
     selected: selected ? { region: selected.zh, lat: Number(selected.lat.toFixed(2)), lon: Number(selected.lon.toFixed(2)) } : null,
     quiz: task === 'A' ? { target: clue.target, result: answerState } : null,
+    aiTurns: chat.filter(m => m.role === 'user').length,
   }));
 
   const card = selected ? cardFor({ properties: { NAME: selected.name, CONTINENT: selected.continent }, geometry: { type: 'Polygon', coordinates: [] } }) : null;
-  const runAi = async () => {
-    if (!selected) return;
-    setAi({ loading: true, data: null });
-    const { data, reason } = await explainRegion(selected.zh, selected.continent);
-    setAi({ loading: false, data });
-    notify(reason === 'unconfigured'
-      ? 'AI 讲解未配置：请在项目根目录 .env 填入 DEEPSEEK_API_KEY 并重启服务（详见 README），已显示内置资料卡。'
-      : data ? 'AI 讲解已生成（AI 生成内容仅供参考）。' : 'AI 讲解不可用（网络或服务问题），已显示内置资料卡。');
+  // AI 对话：发送一条消息并流式接收回复（打字机效果）。
+  const send = async (text: string) => {
+    const t = text.trim();
+    if (!selected || streaming || !t) return;
+    const history = [...chat, { role: 'user' as const, content: t }];
+    setChat(m => [...m, { role: 'user', content: t }, { role: 'assistant', content: '' }]);
+    setStreaming(true);
+    const result = await streamRegionChat(selected.zh, selected.continent, history, d => {
+      setChat(m => m.map((msg, i) => (i === m.length - 1 ? { ...msg, content: msg.content + d } : msg)));
+    });
+    setStreaming(false);
+    if (result === 'unconfigured') {
+      setChat(m => m.map((msg, i) => (i === m.length - 1 ? { ...msg, content: '（AI 服务未配置：请在项目根目录 .env 填入 DEEPSEEK_API_KEY 并重启服务。可先查看“资料卡”。）' } : msg)));
+      notify('AI 讲解未配置（服务端 .env），已显示引导。');
+    } else if (result === 'error') {
+      setChat(m => m.map((msg, i) => (i === m.length - 1 && !msg.content ? { ...msg, content: '（生成失败，请稍后重试；可先查看“资料卡”。）' } : msg)));
+    }
   };
+  useEffect(() => { chatScroll.current?.scrollTo({ top: chatScroll.current.scrollHeight }); }, [chat]);
+  useEffect(() => { setChat([]); setChatView(false); setInput(''); setStreaming(false); }, [selected?.name]);
 
   return <section className="panel geo-panel" hidden={!active}>
     <div className="task-head">
@@ -293,19 +309,37 @@ export function GeographyScene({ active }: SceneProps) {
       }}
       onWheel={e => { e.preventDefault(); zoom(e.deltaY > 0 ? 0.2 : -0.2); }}>
       {regionView && selected && <div className="globe-overlay">
-        <h3>{selected.zh}{selected.name !== selected.zh && selected.name !== 'ocean' ? ` · ${selected.name}` : ''}</h3>
-        <p className="help">位置：纬度 {selected.lat.toFixed(1)}°，经度 {selected.lon.toFixed(1)}° · {selected.continent}</p>
-        {ai.loading && <p className="notice">AI 讲解生成中（约 3–5 秒）……</p>}
-        {(['区位', '地形地貌', '人文特征'] as const).map(k => <div key={k}>
-          <h4>{k}{ai.data ? '（AI 生成）' : ''}</h4>
-          <p>{ai.data?.sections[k] || card?.[k]}</p>
-        </div>)}
-        {ai.data?.question && <p className="notice">探究追问：{ai.data.question}</p>}
-        <div className="task-actions">
-          <button onClick={() => void runAi()} disabled={ai.loading}>{ai.loading ? '生成中…' : 'AI 生成讲解'}</button>
-          <button onClick={() => setRegionView(false)}>返回地球</button>
+        <div className="overlay-head">
+          <h3>{selected.zh}{selected.name !== selected.zh && selected.name !== 'ocean' ? ` · ${selected.name}` : ''}</h3>
+          <div className="task-actions">
+            <button className={chatView ? '' : 'selected'} onClick={() => setChatView(false)}>资料卡</button>
+            <button className={chatView ? 'selected' : ''} onClick={() => setChatView(true)}>AI 问答</button>
+            <button onClick={() => setRegionView(false)}>返回地球</button>
+          </div>
         </div>
-
+        <p className="help">位置：纬度 {selected.lat.toFixed(1)}°，经度 {selected.lon.toFixed(1)}° · {selected.continent}</p>
+        {!chatView ? <>
+          {(['区位', '地形地貌', '人文特征'] as const).map(k => <div key={k}>
+            <h4>{k}</h4>
+            <p>{card?.[k]}</p>
+          </div>)}
+          <div className="task-actions">
+            <button className="primary" style={{ width: 'auto' }} onClick={() => { setChatView(true); if (chat.length === 0) void send('请完整介绍这个区域。'); }}>AI 生成讲解 →</button>
+          </div>
+        </> : <div className="chat-box">
+          <div className="chat-list" ref={chatScroll}>
+            {chat.length === 0 && <p className="help">可以直接提问，或先 <button className="linkish" onClick={() => void send('请完整介绍这个区域。')}>生成完整讲解</button>。</p>}
+            {chat.map((m, i) => <div key={i} className={`chat-msg ${m.role}`}>{m.content}{streaming && i === chat.length - 1 && m.role === 'assistant' ? <span className="chat-cursor">▍</span> : ''}</div>)}
+          </div>
+          <div className="chat-input-row">
+            <input aria-label="向 AI 提问" value={input} disabled={streaming}
+              placeholder={streaming ? 'AI 回复中…' : '向 AI 提问，例如：这里为什么人口集中在沿海？'}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !streaming && input.trim()) { const t = input; setInput(''); void send(t); } }} />
+            <button disabled={streaming || !input.trim()} onClick={() => { const t = input; setInput(''); void send(t); }}>发送</button>
+          </div>
+          <p className="help">内容由 DeepSeek 生成，仅供参考；问答围绕当前区域，对话保留最近 10 轮。</p>
+        </div>}
       </div>}
     </div>
     <aside className="side" style={{ marginTop: 16 }}>
