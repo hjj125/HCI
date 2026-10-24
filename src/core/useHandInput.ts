@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import { PinchGate, numberToolPose } from './interaction';
-export type HandSample = { x: number; y: number; phase: 'start' | 'update' | 'end' | 'cancel'; pinching: boolean; command?: 'undo' | 'pen' | 'eraser' | 'laser' };
+export type HandSample = { x: number; y: number; phase: 'start' | 'update' | 'end' | 'cancel'; pinching: boolean; command?: 'undo' | 'pen' | 'eraser' | 'laser'; hands?: { x: number; y: number }[]; openPalm?: boolean };
 export type HandStatusTexts = { idle?: string; pinching?: string; lost?: string };
 export function useHandInput(onSample: (sample: HandSample) => void, options: { fistUndo?: boolean; background?: boolean; numberTools?: boolean; numberLaser?: boolean; statusTexts?: HandStatusTexts } = {}) {
  const settings=useRef(options);settings.current=options;
@@ -32,7 +32,7 @@ export function useHandInput(onSample: (sample: HandSample) => void, options: { 
   try {
    if(!navigator.mediaDevices?.getUserMedia)throw new Error('请在 localhost 或 HTTPS 下访问');
    const vision=await FilesetResolver.forVisionTasks('/mediapipe/wasm');
-   const options={baseOptions:{modelAssetPath:'/mediapipe/hand_landmarker.task'},runningMode:'VIDEO' as const,numHands:1};
+   const options={baseOptions:{modelAssetPath:'/mediapipe/hand_landmarker.task'},runningMode:'VIDEO' as const,numHands:2};
    try{pendingModel=await HandLandmarker.createFromOptions(vision,{...options,baseOptions:{...options.baseOptions,delegate:'GPU'}});}catch{pendingModel=await HandLandmarker.createFromOptions(vision,options);}
    if(id!==generation.current){pendingModel.close();return;}
    pendingStream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
@@ -43,16 +43,27 @@ export function useHandInput(onSample: (sample: HandSample) => void, options: { 
    let previousTime=-1, smooth:{x:number;y:number}|null=null,wasTracked=false;
    release.current=true;
    let fistSince:number|null=null, fistFired=false;
+   let lastPalm:{x:number;y:number}|null=null;
    let numberCmd:'pen'|'eraser'|'laser'|null=null, numberSince=0, numberFired=false;
-   const lost=()=>{if(wasTracked)cancel();wasTracked=false;smooth=null;release.current=true;fistSince=null;fistFired=false;numberCmd=null;numberSince=0;numberFired=false;setStatus(settings.current.statusTexts?.lost??'追踪丢失 · 操作已取消，请张开手后重新捏合');};
+   const lost=()=>{if(wasTracked)cancel();wasTracked=false;smooth=null;release.current=true;fistSince=null;fistFired=false;lastPalm=null;numberCmd=null;numberSince=0;numberFired=false;setStatus(settings.current.statusTexts?.lost??'追踪丢失 · 操作已取消，请张开手后重新捏合');};
    const loop=()=>{
     if(id!==generation.current)return;
     try{
      if(!pendingStream!.active){stop();return;}
      if(v.readyState>=2&&v.currentTime!==previousTime){
-      previousTime=v.currentTime;const result=model.current!.detectForVideo(v,performance.now()),p=result.landmarks[0];
-      if(!p) { if(wasTracked)lost(); }
+      previousTime=v.currentTime;const result=model.current!.detectForVideo(v,performance.now()),all=result.landmarks;
+      if(!all.length) { if(wasTracked)lost(); }
       else {
+       // 双手同时可见时“贴住”上一次的主手（按手掌中心最近距离），避免指针与挥手轨迹跳变。
+       const palmOf=(l:typeof all[0])=>({x:1-(l[0].x+l[9].x+l[17].x)/3,y:(l[0].y+l[9].y+l[17].y)/3});
+       let idx=0;
+       if(all.length>1&&lastPalm){
+        const d0=Math.hypot(palmOf(all[0]).x-lastPalm.x,palmOf(all[0]).y-lastPalm.y);
+        const d1=Math.hypot(palmOf(all[1]).x-lastPalm.x,palmOf(all[1]).y-lastPalm.y);
+        idx=d1<d0?1:0;
+       }
+       const p=all[idx];lastPalm=palmOf(all[idx]);
+       const hands=all.length>=2?all.map(palmOf):undefined;
        wasTracked=true;const scale=Math.hypot(p[0].x-p[9].x,p[0].y-p[9].y)||.1;
        // 握拳为可选离散指令。
        const distance=(a:number,b:number)=>Math.hypot(p[a].x-p[b].x,p[a].y-p[b].y);
@@ -88,7 +99,8 @@ export function useHandInput(onSample: (sample: HandSample) => void, options: { 
        const change=release.current?null:gate.current.update(ratio,performance.now());
        setCursor({...smooth,pinching:gate.current.active});
        setStatus(release.current?'请先张开拇指和食指':gate.current.active?(settings.current.statusTexts?.pinching??'捏合中 · 松开提交操作'):(settings.current.statusTexts?.idle??'追踪就绪 · 指向目标后捏合'));
-       callback.current({...smooth,phase:change==='start'?'start':change==='end'?'end':'update',pinching:gate.current.active});
+       const openPalm=[[8,6],[12,10],[16,14],[20,18]].every(([tip,pip])=>distance(tip,0)>distance(pip,0)*1.12)&&!gate.current.active;
+       callback.current({...smooth,phase:change==='start'?'start':change==='end'?'end':'update',pinching:gate.current.active,hands,openPalm});
       }
      }
     }catch(error){console.error(error);stop();setStatus('识别中断，请重新启用摄像头或使用鼠标');return;}
