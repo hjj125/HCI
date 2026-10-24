@@ -253,7 +253,8 @@ export function GeographyScene({ active }: SceneProps) {
   // AI 对话：发送一条消息并流式接收回复（打字机效果）。
   const send = async (text: string) => {
     const t = text.trim();
-    if (!selected || streaming || !t) return;
+    if (!selected || !t) return;
+    if (streaming) { notify('AI 正在回复中，请等当前回答完成后再继续提问。'); return; }
     const history = [...chat, { role: 'user' as const, content: t }];
     setChat(m => [...m, { role: 'user', content: t }, { role: 'assistant', content: '' }]);
     setStreaming(true);
@@ -324,7 +325,7 @@ export function GeographyScene({ active }: SceneProps) {
             <p>{card?.[k]}</p>
           </div>)}
           <div className="task-actions">
-            <button className="primary" style={{ width: 'auto' }} onClick={() => { setChatView(true); if (chat.length === 0) void send('请完整介绍这个区域。'); }}>AI 生成讲解 →</button>
+            <button className="primary" style={{ width: 'auto' }} disabled={streaming} onClick={() => { setChatView(true); if (chat.length === 0) void send('请完整介绍这个区域。'); }}>{streaming ? 'AI 回复中…' : 'AI 生成讲解 →'}</button>
           </div>
         </> : <div className="chat-box">
           <div className="chat-list" ref={chatScroll}>
