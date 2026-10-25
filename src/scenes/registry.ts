@@ -6,6 +6,7 @@ import { FunctionsScene } from './functions/FunctionsScene';
 import { AngleScene } from './bodyangle/AngleScene';
 import { PhysicsScene } from './physics/PhysicsScene';
 import { MoleculeScene } from './molecule/MoleculeScene';
+import { ReciteScene } from './recite/ReciteScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
 import { SeasonsScene } from './geography/SeasonsScene';
@@ -41,6 +42,12 @@ export const subjects: SubjectGroup[] = [
     id: 'chemistry', title: '化学',
     experiments: [
       { id: 'chem-molecule', title: '分子搭建', icon: '⚛', description: '点选原子成键，搭出分子模型与同分异构体（演示 + 任务 A/B/C）', component: MoleculeScene },
+    ],
+  },
+  {
+    id: 'chinese', title: '语文',
+    experiments: [
+      { id: 'chinese-recite', title: '背诵镜', icon: '文', description: '对麦克风背诵古诗词，逐字对齐标注易错字（演示 + 任务 A/B/C）', component: ReciteScene },
     ],
   },
   {
