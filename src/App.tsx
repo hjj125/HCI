@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { bus, type InteractionEvent, type RecordedEvent, type SceneId } from './core/interaction';
 import { useHandInput, type HandSample } from './core/useHandInput';
+import { usePoseInput } from './core/usePoseInput';
 import { useVoiceInput } from './core/useVoiceInput';
-import { ServicesProvider, SettingsProvider, type AppServices, type DragSession, type SceneSettings } from './core/services';
+import { ServicesProvider, SettingsProvider, type AppServices, type DragSession, type SceneSettings, type PoseSample } from './core/services';
 import { subjects, experiments, experimentTitle } from './scenes/registry';
 import './styles.css';
 
@@ -38,6 +39,12 @@ export default function App() {
   const registerVoicePolicy = useCallback((scene: SceneId, handler: ((text: string) => boolean) | null) => {
     if (handler) voicePolicies.current.set(scene, handler); else voicePolicies.current.delete(scene);
   }, []);
+  const posePolicies = useRef(new Map<SceneId, (sample: PoseSample) => void>());
+  const [poseActive, setPoseActive] = useState(false);
+  const registerPosePolicy = useCallback((scene: SceneId, handler: ((sample: PoseSample) => void) | null) => {
+    if (handler) posePolicies.current.set(scene, handler); else posePolicies.current.delete(scene);
+    setPoseActive(posePolicies.current.size > 0);
+  }, []);
   const registerSnapshot = useCallback((scene: SceneId, get: (() => Record<string, unknown>) | null) => {
     if (get) snapshots.current.set(scene, get); else snapshots.current.delete(scene);
   }, []);
@@ -67,9 +74,10 @@ export default function App() {
   const services = useMemo<AppServices>(() => ({
     notify: setNotice,
     cancelHand: () => hand.cancel(),
-    registerPolicy, registerVoicePolicy, registerSnapshot, drag,
+    registerPolicy, registerVoicePolicy, registerPosePolicy, registerSnapshot, drag,
     pauseRecognition: ms => voiceCtl.current?.(ms),
-  }), [hand.cancel, registerPolicy, registerVoicePolicy, registerSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+    handVideo: hand.video,
+  }), [hand.cancel, registerPolicy, registerVoicePolicy, registerPosePolicy, registerSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 语音命令：全局短语走统一事件总线；未命中的原文转交激活场景的场景级语音策略。
   const voiceCtl = useRef<((ms: number) => void) | null>(null);
@@ -85,6 +93,11 @@ export default function App() {
     bus.emit({ scene: mode, source: 'voice', intent: cmd.intent, phase: 'end' });
   });
   voiceCtl.current = voice.pauseFor ?? null;
+
+  // 姿态识别：与手部共享摄像头画面，仅在激活场景注册了姿态策略时逐帧推理。
+  const pose = usePoseInput(hand.video, hand.enabled, poseActive, sample => {
+    posePolicies.current.get(mode)?.(sample);
+  });
 
   // 全局语义事件：场景切换、学习记录。学科逻辑由各场景插件自行订阅处理。
   useEffect(() => bus.subscribe(e => {
@@ -155,6 +168,7 @@ export default function App() {
             <div className="status">
               <b className={hand.enabled ? 'ok' : ''}>● {hand.status}</b>
               <span>鼠标随时可用 · 默认不录制画面</span>
+              {poseActive && <span className={pose.loading ? '' : 'ok'}>⦾ {pose.loading ? '…' : pose.status}</span>}
               {voice.enabled && <span className="ok">🎙 {voice.status}{voice.lastHeard ? ` · “${voice.lastHeard}”` : ''}</span>}
             </div>
           </div>

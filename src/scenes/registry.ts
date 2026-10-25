@@ -7,6 +7,7 @@ import { AngleScene } from './bodyangle/AngleScene';
 import { PhysicsScene } from './physics/PhysicsScene';
 import { MoleculeScene } from './molecule/MoleculeScene';
 import { ReciteScene } from './recite/ReciteScene';
+import { BioMotionScene } from './biomotion/BioMotionScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
 import { SeasonsScene } from './geography/SeasonsScene';
@@ -48,6 +49,12 @@ export const subjects: SubjectGroup[] = [
     id: 'chinese', title: '语文',
     experiments: [
       { id: 'chinese-recite', title: '背诵镜', icon: '文', description: '对麦克风背诵古诗词，逐字对齐标注易错字（演示 + 任务 A/B/C）', component: ReciteScene },
+    ],
+  },
+  {
+    id: 'biology', title: '生物',
+    experiments: [
+      { id: 'bio-motion', title: '运动系统', icon: '⦾', description: '骨架叠加摄像头，探究关节与骨骼肌协作（演示 + 任务 A/B/C）', component: BioMotionScene },
     ],
   },
   {

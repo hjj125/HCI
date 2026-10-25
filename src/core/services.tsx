@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, type ReactNode, type MutableRefObject } from 'react';
+import { createContext, useContext, useEffect, useRef, type ReactNode, type MutableRefObject, type RefObject } from 'react';
 import type { HandSample } from './useHandInput';
 import type { SceneId } from './interaction';
 
@@ -12,16 +12,21 @@ import type { SceneId } from './interaction';
  * 场景只通过这些接口与平台交互，不直接触碰摄像头或其他场景。
  */
 export type DragSession = { scene: SceneId; initial?: Record<string, number>; x: number; y: number } | null;
+export type PoseSample = { landmarks: { x: number; y: number; z: number; visibility: number }[] };
 export type AppServices = {
   notify: (message: string) => void;
   cancelHand: () => void;
   registerPolicy: (scene: SceneId, handler: ((sample: HandSample) => void) | null) => void;
   /** 场景级语音策略：全局短语未命中的识别原文转交激活场景解释；返回 true 表示已消费。 */
   registerVoicePolicy: (scene: SceneId, handler: ((text: string) => boolean) | null) => void;
+  /** 姿态策略：激活场景注册后平台启动 PoseLandmarker 并逐帧转交（生物实验用）。 */
+  registerPosePolicy: (scene: SceneId, handler: ((sample: PoseSample) => void) | null) => void;
   registerSnapshot: (scene: SceneId, get: (() => Record<string, unknown>) | null) => void;
   /** TTS 播报期间暂停语音识别（防喇叭回听造成自激循环），ms 后自动恢复。 */
   pauseRecognition: (ms: number) => void;
   drag: MutableRefObject<DragSession>;
+  /** 共享摄像头画面（手部与姿态识别共用的 <video> 元素）。 */
+  handVideo: RefObject<HTMLVideoElement | null>;
 };
 const ServicesContext = createContext<AppServices | null>(null);
 
@@ -84,6 +89,16 @@ export function useSceneVoicePolicy(scene: SceneId, handler: (text: string) => b
     registerVoicePolicy(scene, text => latest.current(text));
     return () => registerVoicePolicy(scene, null);
   }, [scene, registerVoicePolicy]);
+}
+
+/** 场景注册姿态策略：随挂载/卸载自动登记；仅激活场景收到姿态采样。 */
+export function useScenePosePolicy(scene: SceneId, handler: (sample: PoseSample) => void) {
+  const { registerPosePolicy } = useServices();
+  const latest = useRef(handler); latest.current = handler;
+  useEffect(() => {
+    registerPosePolicy(scene, sample => latest.current(sample));
+    return () => registerPosePolicy(scene, null);
+  }, [scene, registerPosePolicy]);
 }
 
 /** TTS 简短播报：浏览器 speechSynthesis，免 key；仅用于确认类短句。返回预计时长毫秒（供调用方暂停语音识别防回听）。 */
