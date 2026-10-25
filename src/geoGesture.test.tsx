@@ -72,6 +72,17 @@ describe('数字地球手势', () => {
     expect(notice()).not.toContain('已识别向');
   });
 
+  it('捏合长按 0.7 秒直接进入区域详情', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: /◉s*数字地球/ }));
+    act(() => hand.emit!({ x: .5, y: .4, phase: 'start', pinching: true }));
+    for (let i = 0; i < 10; i++) {
+      act(() => hand.emit!({ x: .5 + (Math.random() - .5) * 0.01, y: .4, phase: 'update', pinching: true }));
+      await sleep(90); // 累计约 0.9 秒
+    }
+    await waitFor(() => expect(notice()).toContain('已进入区域详情'));
+  });
+
   it('双手张合样本与张开手掌悬停不导致崩溃（缩放在 WebGL 不可用时安全跳过）', async () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));

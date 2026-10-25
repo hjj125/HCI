@@ -51,6 +51,9 @@ export function GeographyScene({ active }: SceneProps) {
   // 捏合闭合瞬间食指指尖会向拇指偏移，用闭合后的位置会选偏邻国或海洋。
   const lastAim = useRef({ x: 0.5, y: 0.5 });
   const pinchAnchor = useRef<{ x: number; y: number } | null>(null);
+  // 捏合长按 ≈0.7 秒（且未拖动）= 选中并直接进入区域详情。
+  const pinchSince = useRef(0);
+  const holdFired = useRef(false);
   const host = useRef<HTMLDivElement>(null);
   const world = useRef<World | null>(null);
   const live = useRef({ selected, features, graticule });
@@ -203,11 +206,12 @@ export function GeographyScene({ active }: SceneProps) {
 
   // 手势策略（统一交互，无模式切换）：挥动=惯性旋转；捏合拖动=直接旋转；捏合点击=选中；张掌悬停=刹车；双手张合=缩放。
   useScenePolicy('geography', sample => {
-    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; pinchAnchor.current = null; return; }
+    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; pinchAnchor.current = null; pinchSince.current = 0; holdFired.current = false; return; }
     // 捏合开始即冻结惯性：捏合意味着精确定位，残余滑行会让选中的国家“跑掉”。
     if (sample.phase === 'start') {
       spinVel.current = 0; pitchVel.current = 0;
       pinchAnchor.current = { x: sample.x, y: sample.y };
+      pinchSince.current = performance.now(); holdFired.current = false;
       drag.current = { scene: 'geography', x: sample.x, y: sample.y };
       return;
     }
@@ -215,11 +219,11 @@ export function GeographyScene({ active }: SceneProps) {
       swipeGraceUntil.current = performance.now() + 1200;
       swipe.current.reset(); swipeV.current.reset();
       // 点击判定：捏合期间几乎没移动 → 选中国家；选点用捏合前的指向位置。
-      if (drag.current?.scene === 'geography' && pinchAnchor.current) {
+      if (!holdFired.current && drag.current?.scene === 'geography' && pinchAnchor.current) {
         const moved = Math.hypot(sample.x - pinchAnchor.current.x, sample.y - pinchAnchor.current.y);
         if (moved < 0.05) selectAt(lastAim.current.x, lastAim.current.y);
       }
-      drag.current = null; pinchAnchor.current = null;
+      drag.current = null; pinchAnchor.current = null; pinchSince.current = 0; holdFired.current = false;
       return;
     }
     // 捏合前的移动持续更新“瞄准点”（闭合后的位置不用，见 lastAim 注释）。
@@ -252,8 +256,17 @@ export function GeographyScene({ active }: SceneProps) {
         notify(vdir === 'down' ? '已识别向下挥手 · 视角转向北半球' : '已识别向上挥手 · 视角转向南半球');
       }
     } else { swipe.current.reset(); swipeV.current.reset(); }  // 捏合中/静默期：清空轨迹
+    // 捏合长按（未拖动）≈0.7 秒 → 选中并进入区域详情。
+    if (drag.current?.scene === 'geography' && sample.pinching && !holdFired.current && !regionView && pinchAnchor.current &&
+        Math.hypot(sample.x - pinchAnchor.current.x, sample.y - pinchAnchor.current.y) < 0.05 &&
+        performance.now() - pinchSince.current > 700) {
+      holdFired.current = true;
+      selectAt(lastAim.current.x, lastAim.current.y);
+      setRegionView(true);
+      notify('捏合长按 · 已进入区域详情（Esc 或“返回地球”退出）');
+    }
     // 捏合拖动 → 直接旋转（增量应用）。
-    if (drag.current?.scene === 'geography' && sample.pinching) {
+    if (drag.current?.scene === 'geography' && sample.pinching && !holdFired.current) {
       applyRotate(sample.x - drag.current.x, sample.y - drag.current.y);
       drag.current.x = sample.x; drag.current.y = sample.y;
     }
@@ -349,7 +362,7 @@ export function GeographyScene({ active }: SceneProps) {
       <button onClick={() => zoom(-0.35)}>放大 +</button>
       <button onClick={() => zoom(0.35)}>缩小 −</button>
       <label className="small"><input type="checkbox" checked={graticule} onChange={e => setGraticule(e.target.checked)} /> 经纬网</label>
-      <span className="help">挥手=旋转（左右自转、上下俯仰，有惯性）；指向国家捏合一下=选中；捏合拖动=微调旋转；张开手掌悬停≈刹车；双手张合缩放（鼠标：拖动/单击/滚轮）</span>
+      <span className="help">挥手=旋转（左右自转、上下俯仰，有惯性）；指向国家捏合一下=选中、捏合保持≈0.7秒=直接进入详情、捏合拖动=微调旋转；张开手掌悬停≈刹车；双手张合缩放（鼠标：拖动/单击/滚轮）</span>
     </div>
     <div className="geo-host" ref={host}
       onPointerDown={e => {
