@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import { PinchGate, numberToolPose } from './interaction';
-export type HandSample = { x: number; y: number; phase: 'start' | 'update' | 'end' | 'cancel'; pinching: boolean; command?: 'undo' | 'pen' | 'eraser' | 'laser'; hands?: { x: number; y: number }[]; openPalm?: boolean };
+export type HandSample = { x: number; y: number; phase: 'start' | 'update' | 'end' | 'cancel'; pinching: boolean; command?: 'undo' | 'pen' | 'eraser' | 'laser'; hands?: { x: number; y: number }[]; landmarks?: { x: number; y: number }[][]; openPalm?: boolean };
 export type HandStatusTexts = { idle?: string; pinching?: string; lost?: string };
 export function useHandInput(onSample: (sample: HandSample) => void, options: { fistUndo?: boolean; background?: boolean; numberTools?: boolean; numberLaser?: boolean; statusTexts?: HandStatusTexts } = {}) {
  const settings=useRef(options);settings.current=options;
@@ -100,7 +100,7 @@ export function useHandInput(onSample: (sample: HandSample) => void, options: { 
        setCursor({...smooth,pinching:gate.current.active});
        setStatus(release.current?'请先张开拇指和食指':gate.current.active?(settings.current.statusTexts?.pinching??'捏合中 · 松开提交操作'):(settings.current.statusTexts?.idle??'追踪就绪 · 指向目标后捏合'));
        const openPalm=[[8,6],[12,10],[16,14],[20,18]].every(([tip,pip])=>distance(tip,0)>distance(pip,0)*1.12)&&!gate.current.active;
-       callback.current({...smooth,phase:change==='start'?'start':change==='end'?'end':'update',pinching:gate.current.active,hands,openPalm});
+       callback.current({...smooth,phase:change==='start'?'start':change==='end'?'end':'update',pinching:gate.current.active,hands,landmarks:all.map(h=>h.map(p=>({x:1-p.x,y:p.y}))),openPalm});
       }
      }
     }catch(error){console.error(error);stop();setStatus('识别中断，请重新启用摄像头或使用鼠标');return;}

@@ -3,6 +3,7 @@ import { SlidesScene } from './slides/SlidesScene';
 import { WhiteboardScene } from './whiteboard/WhiteboardScene';
 import { GeometryScene } from './geometry/GeometryScene';
 import { FunctionsScene } from './functions/FunctionsScene';
+import { AngleScene } from './bodyangle/AngleScene';
 import { PhysicsScene } from './physics/PhysicsScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
@@ -26,6 +27,7 @@ export const subjects: SubjectGroup[] = [
     experiments: [
       { id: 'geometry', title: '空间几何', icon: '◇', description: '正方体截面探究（演示 + 任务 A/B/C）', component: GeometryScene },
       { id: 'functions', title: '函数绘图', icon: '∿', description: '用身体画函数：手势采样→拟合识别类型与表达式（演示 + 任务 A/B/C）', component: FunctionsScene },
+      { id: 'math-bodyangle', title: '身体量角器', icon: '∠', description: '用双手拼出角度：关键点夹角实时测量与内角和探究（演示 + 任务 A/B/C）', component: AngleScene },
     ],
   },
   {
