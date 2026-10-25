@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, type RefObject } from 'react';
 import * as THREE from 'three';
 import { latLonToVector3, vector3ToLatLon, type RegionFeature } from './geoMath';
+import { ZONE_ORDER, type Zone } from './solarMath';
 
 /** 选中的位置（marker 与边界高亮）。 */
 export type GlobeSelection = { name: string; lat: number; lon: number } | null;
@@ -25,6 +26,12 @@ type Props = {
   night?: boolean;
   /** 世界坐标系太阳方向（单位向量）；night 模式下驱动昼夜分界。 */
   sunDirection?: [number, number, number] | null;
+  /** 五带可视化：纬度带着色 overlay + 回归线/极圈分界纬线（五带与四季实验用，默认关闭）。 */
+  zones?: boolean;
+  /** 太阳直射点标记（五带与四季实验用）。 */
+  subsolarMarker?: { lat: number; lon: number } | null;
+  /** 语音点名高亮某一带（ZONE_ORDER 中的名称）。 */
+  highlightZone?: Zone | null;
 };
 
 /**
@@ -33,7 +40,7 @@ type Props = {
  * 地理学科的两个实验（找国家、晨昏线）共用本组件。
  */
 export const GlobeView = forwardRef<GlobeHandle, Props>(function GlobeView(
-  { hostRef, features, selected, graticule, night = false, sunDirection = null }, ref,
+  { hostRef, features, selected, graticule, night = false, sunDirection = null, zones = false, subsolarMarker = null, highlightZone = null }, ref,
 ) {
   // 惯性旋转状态（组件内部）：挥手冲量、张掌刹车、捏合冻结都经由 handle 方法驱动。
   const spinVel = useRef(0);
@@ -169,6 +176,36 @@ export const GlobeView = forwardRef<GlobeHandle, Props>(function GlobeView(
     earthGroup.add(highlight);
     const marker = new THREE.Mesh(new THREE.SphereGeometry(0.018, 16, 16), new THREE.MeshBasicMaterial({ color: 0xf4c784 }));
     marker.visible = false; earthGroup.add(marker);
+    // 五带着色带（按 vUv.y 分带着色）+ 回归线/极圈分界纬线；uHi 为语音点名的高亮带索引（-1 无）。
+    const zoneGroup = new THREE.Group(); zoneGroup.name = 'zones'; zoneGroup.visible = false; earthGroup.add(zoneGroup);
+    const zoneMaterial = new THREE.ShaderMaterial({
+      uniforms: { uHi: { value: -1 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: [
+        'uniform float uHi; varying vec2 vUv;',
+        'void main(){',
+        '  float lat = vUv.y * 180.0 - 90.0;',
+        '  vec3 col; float idx;',
+        '  if (lat >= 66.56) { col = vec3(0.62,0.80,1.0); idx = 0.0; }',
+        '  else if (lat >= 23.44) { col = vec3(0.55,0.90,0.65); idx = 1.0; }',
+        '  else if (lat > -23.44) { col = vec3(1.0,0.78,0.45); idx = 2.0; }',
+        '  else if (lat > -66.56) { col = vec3(0.55,0.90,0.65); idx = 3.0; }',
+        '  else { col = vec3(0.62,0.80,1.0); idx = 4.0; }',
+        '  float a = (abs(idx - uHi) < 0.5) ? 0.42 : 0.18;',
+        '  gl_FragColor = vec4(col, a);',
+        '}',
+      ].join('\n'),
+      transparent: true, depthWrite: false,
+    });
+    zoneGroup.add(new THREE.Mesh(new THREE.SphereGeometry(1.005, 48, 48), zoneMaterial));
+    const zoneLineMat = new THREE.LineBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.85 });
+    for (const zlat of [23.44, -23.44, 66.56, -66.56]) for (let lon = -180; lon < 180; lon += 5) {
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...latLonToVector3(zlat, lon, 1.008)), new THREE.Vector3(...latLonToVector3(zlat, lon + 5, 1.008))]);
+      zoneGroup.add(new THREE.Line(g, zoneLineMat));
+    }
+    // 太阳直射点标记：亮黄圆盘，落在直射纬线上（经度随 UTC 移动）。
+    const subsolar = new THREE.Mesh(new THREE.SphereGeometry(0.022, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffd34d }));
+    subsolar.visible = false; earthGroup.add(subsolar);
     const resize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); camera.aspect = h ? w / h : 1; camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize); observer.observe(el); resize();
     let frame = 0, prev = performance.now();
@@ -197,7 +234,7 @@ export const GlobeView = forwardRef<GlobeHandle, Props>(function GlobeView(
       renderer.render(scene, camera);
     };
     tick();
-    world.current = { scene, camera, renderer, earthGroup, earth, marker, highlight, borders, observer, nightMaterial };
+    world.current = { scene, camera, renderer, earthGroup, earth, marker, highlight, borders, observer, nightMaterial, zoneGroup, zoneMaterial, subsolar };
     return () => { cancelAnimationFrame(frame); observer.disconnect(); renderer.dispose(); renderer.domElement.remove(); world.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -207,6 +244,22 @@ export const GlobeView = forwardRef<GlobeHandle, Props>(function GlobeView(
     const w = world.current; if (!w || !sunDirection) return;
     w.nightMaterial.uniforms.sunDir.value.set(sunDirection[0], sunDirection[1], sunDirection[2]);
   }, [sunDirection]);
+
+  // 五带显示开关 / 直射点标记 / 语音点名高亮带。
+  useEffect(() => {
+    const w = world.current; if (!w) return;
+    w.zoneGroup.visible = zones;
+  }, [zones]);
+  useEffect(() => {
+    const w = world.current; if (!w) return;
+    if (!subsolarMarker) { w.subsolar.visible = false; return; }
+    w.subsolar.position.set(...latLonToVector3(subsolarMarker.lat, subsolarMarker.lon, 1.03));
+    w.subsolar.visible = true;
+  }, [subsolarMarker]);
+  useEffect(() => {
+    const w = world.current; if (!w) return;
+    w.zoneMaterial.uniforms.uHi.value = highlightZone ? ZONE_ORDER.indexOf(highlightZone) : -1;
+  }, [highlightZone]);
 
   // 边界数据 → 线段。
   useEffect(() => {

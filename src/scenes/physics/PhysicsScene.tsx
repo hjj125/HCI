@@ -42,7 +42,16 @@ export function PhysicsScene({ active }: SceneProps) {
   const [waypoints, setWaypoints] = useState<[number, number][]>(() => makeWaypoints(3));
   const [collected, setCollected] = useState(0);
   const [attempts, setAttempts] = useState(0);
-  const [gameStats, setGameStats] = useState<{ seconds: number; thrusts: number; attempts: number } | null>(null);
+  const [gameStats, setGameStats] = useState<{ outcome: 'win' | 'out' | 'early'; seconds: number; thrusts: number; attempts: number } | null>(null);
+  /** 再试一次：同一星图，清空进度与计时。 */
+  const retryGame = () => {
+    collectedRef.current = 0; attemptsRef.current = 0; thrustsRef.current = 0;
+    setCollected(0); setAttempts(0); setGameStats(null); setCompleted(false);
+    runSeconds.current = 0;
+    const s0 = { x: GAME_START[0], y: GAME_START[1], vx: 0, vy: 0 };
+    setBody(s0); setTrail([[s0.x, s0.y]]); setRunning(false);
+    notify('新的一局：计时归零，同一张星图。');
+  };
   const collectedRef = useRef(0);
   const attemptsRef = useRef(0);
   const thrustsRef = useRef(0);
@@ -93,16 +102,22 @@ export function PhysicsScene({ active }: SceneProps) {
             }
           } else if (inTarget(next, GAME_GOAL)) {
             setRunning(false); setCompleted(true);
-            const stats = { seconds: runSeconds.current, thrusts: thrustsRef.current, attempts: attemptsRef.current };
+            const stats = { outcome: 'win' as const, seconds: runSeconds.current, thrusts: thrustsRef.current, attempts: attemptsRef.current };
             setGameStats(stats);
-            notify('🏁 挑战成功！用时 ' + stats.seconds.toFixed(1) + ' 秒，施力 ' + stats.thrusts + ' 次，出界 ' + stats.attempts + ' 次');
+            notify('🏁 挑战成功！用时 ' + stats.seconds.toFixed(1) + ' 秒，施力 ' + stats.thrusts + ' 次');
             return;
           }
           if (next.x < -0.8 || next.x > 20.8 || next.y < -0.8 || next.y > 10.8) {
-            attemptsRef.current += 1; setAttempts(attemptsRef.current);
-            setBody({ x: GAME_START[0], y: GAME_START[1], vx: 0, vy: 0 });
-            setTrail([[GAME_START[0], GAME_START[1]]]);
-            notify('漂出观测区（第 ' + attemptsRef.current + ' 次），已送回起点——计时继续');
+            attemptsRef.current += 1;
+            setRunning(false); setCompleted(true);
+            setGameStats({ outcome: 'out', seconds: runSeconds.current, thrusts: thrustsRef.current, attempts: attemptsRef.current });
+            notify('💥 挑战失败：探测器漂出观测区。可“再试一次”（同一星图）');
+            return;
+          }
+          if (inTarget(next, GAME_GOAL)) {
+            setRunning(false); setCompleted(true);
+            setGameStats({ outcome: 'early', seconds: runSeconds.current, thrusts: thrustsRef.current, attempts: attemptsRef.current });
+            notify('💥 挑战失败：还有 ' + (g.waypoints.length - g.collected) + ' 个信标未收集。须按顺序收集全部信标后再进入终点。');
             return;
           }
           setBody(next);
@@ -201,7 +216,7 @@ export function PhysicsScene({ active }: SceneProps) {
     if (e.scene !== 'physics') return;
     if (e.intent === 'run') {
       if (task === 'A' && !submitted) { notify('任务 A：先提交预测，再运行验证。'); return; }
-      if (task === 'game' && gameStats) { notify('本局已结束，点“再来一局”开新挑战。'); return; }
+      if (task === 'game' && gameStats) { notify('本局已结束：失败点“再试一次”，或换一张星图。'); return; }
       const start = task === 'game' ? { x: GAME_START[0], y: GAME_START[1], vx: 0, vy: 0 } : task === 'B' ? REST : INITIAL;
       runSeconds.current = 0; setBody(start); setTrail([[start.x, start.y]]); setObserved(null); setCompleted(false); setRunning(true);
     }
@@ -304,9 +319,12 @@ export function PhysicsScene({ active }: SceneProps) {
         ctx.fillStyle = done ? '#3a5a52' : '#5de0c6'; ctx.font = 'bold 14px sans-serif';
         ctx.fillText(done ? '✓' : ['①', '②', '③'][i], W(w[0]) - (done ? 6 : 7), H(w[1]) + 5);
       });
-      if (gameStats) {
+      if (gameStats?.outcome === 'win') {
         ctx.fillStyle = '#f4c784'; ctx.font = 'bold 34px sans-serif';
         ctx.fillText('🏁 挑战成功！', c.width / 2 - 110, c.height / 2 - 60);
+      } else if (gameStats) {
+        ctx.fillStyle = '#ff5a5a'; ctx.font = 'bold 34px sans-serif';
+        ctx.fillText('💥 挑战失败', c.width / 2 - 100, c.height / 2 - 60);
       }
     }
     ctx.fillStyle = '#e5edf7'; ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
@@ -372,10 +390,12 @@ export function PhysicsScene({ active }: SceneProps) {
           <div className="chips">
             {waypoints.map((w, i) => <button key={i} disabled className={i < collected ? 'selected' : ''}>{['①', '②', '③'][i]} 信标 {i < collected ? '✓' : ''}</button>)}
           </div>
-          {gameStats
-            ? <div className="notice">🏁 成功！用时 {gameStats.seconds.toFixed(1)} 秒 · 施力 {gameStats.thrusts} 次 · 出界 {gameStats.attempts} 次<br /><button onClick={() => emit('reset')}>再来一局（新地图）</button></div>
-            : <p className="help">已收集 {collected}/{waypoints.length} · 出界 {attempts} 次。提示：先给一次大力朝向①，途中用小力修正；惯性会替你省力。</p>}
-          <button onClick={() => emit('reset')}>换一张星图</button>
+          {gameStats ? (
+            gameStats.outcome === 'win'
+              ? <div className="notice">🏁 成功！用时 {gameStats.seconds.toFixed(1)} 秒 · 施力 {gameStats.thrusts} 次<br /><button onClick={() => emit('reset')}>再来一局（新地图）</button></div>
+              : <div className="notice">💥 挑战失败：{gameStats.outcome === 'out' ? '探测器漂出了观测区' : '还有 ' + (waypoints.length - collected) + ' 个信标未收集就进入了终点'}。用时 {gameStats.seconds.toFixed(1)} 秒。<br /><button onClick={retryGame}>再试一次（同一星图）</button> <button onClick={() => emit('reset')}>换一张星图</button></div>
+          ) : <p className="help">已收集 {collected}/{waypoints.length}。规则：按顺序收集全部信标后进入终点——出界或提前进入终点都算失败。提示：先给一次大力朝向①，途中用小力修正；惯性会替你省力。</p>}
+          {!gameStats && <button onClick={() => emit('reset')}>换一张星图</button>}
         </>
         : task === 'C' ? <>
           <div className="chips">{snaps.map((s, i) => <button key={i} className="selected">{i + 1} · {s.label}</button>)}</div>
