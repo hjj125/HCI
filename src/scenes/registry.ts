@@ -2,6 +2,7 @@ import type { SubjectGroup, ExperimentDefinition } from './types';
 import { SlidesScene } from './slides/SlidesScene';
 import { WhiteboardScene } from './whiteboard/WhiteboardScene';
 import { GeometryScene } from './geometry/GeometryScene';
+import { FunctionsScene } from './functions/FunctionsScene';
 import { PhysicsScene } from './physics/PhysicsScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
@@ -23,6 +24,7 @@ export const subjects: SubjectGroup[] = [
     id: 'math', title: '数学',
     experiments: [
       { id: 'geometry', title: '空间几何', icon: '◇', description: '正方体截面探究（演示 + 任务 A/B/C）', component: GeometryScene },
+      { id: 'functions', title: '函数绘图', icon: '∿', description: '用身体画函数：手势采样→拟合识别类型与表达式（演示 + 任务 A/B/C）', component: FunctionsScene },
     ],
   },
   {
