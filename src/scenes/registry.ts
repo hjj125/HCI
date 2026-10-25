@@ -7,6 +7,7 @@ import { PhysicsScene } from './physics/PhysicsScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
 import { SeasonsScene } from './geography/SeasonsScene';
+import { MoonPhaseScene } from './geography/MoonPhaseScene';
 
 /**
  * 学科注册表：每个学科下辖若干实验，平台壳按学科分组渲染导航。
@@ -39,6 +40,7 @@ export const subjects: SubjectGroup[] = [
       { id: 'geography', title: '找国家', icon: '◉', description: '手势旋转地球、选中区域与 AI 讲解（支持语音定位）', component: GeographyScene },
       { id: 'geo-daynight', title: '晨昏线', icon: '◐', description: '昼夜半球与城市灯光，时区与晨昏线探究（演示 + 任务 A/B）', component: DayNightScene },
       { id: 'geo-seasons', title: '五带与四季', icon: '☀', description: '五带划分、昼夜长短与太阳视运动影长探究（演示 + 任务 A/B/C）', component: SeasonsScene },
+      { id: 'geo-moonphase', title: '月相仪', icon: '☾', description: '月相成因与周期：拖动月球公转，看朔望圆缺（演示 + 任务 A/B/C）', component: MoonPhaseScene },
     ],
   },
 ];
