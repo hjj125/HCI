@@ -19,7 +19,7 @@
 /* ===== 平台壳布局：侧边导航 + 工作区（场景插件内容） ===== */
 [hidden]{display:none!important}
 .app-shell{display:grid;grid-template-columns:216px minmax(0,1fr);min-height:100vh}
-.sidebar{display:flex;flex-direction:column;gap:18px;padding:22px 14px;background:#0d1728;border-right:1px solid #26394f;position:sticky;top:0;height:100vh;box-sizing:border-box}
+.sidebar{display:flex;flex-direction:column;gap:18px;padding:22px 14px;background:#0d1728;border-right:1px solid #26394f;position:sticky;top:0;height:100vh;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box}
 .brand-block{padding:2px 8px 14px;border-bottom:1px solid #223349}
 .brand{font-size:19px;font-weight:750;letter-spacing:-.3px;color:#e5edf7}
 .brand-cn{font-size:14px;color:#7ae8d4;margin-top:3px}
