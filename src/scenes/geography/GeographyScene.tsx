@@ -1,21 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
-import { useScenePolicy, useSceneSnapshot, useServices } from '../../core/services';
-import { latLonToVector3, vector3ToLatLon, findRegion, type RegionFeature } from './geoMath';
-import { loadWorld, regionName, cardFor, CLUES } from './regionData';
+import { speak, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
+import { findRegion, type RegionFeature } from './geoMath';
+import { loadWorld, regionName, cardFor, CLUES, computeCentroids, matchCountry } from './regionData';
 import { SwipeDetector, VerticalSwipeDetector } from '../slides/pptGesture';
 import { streamRegionChat, type ChatMessage } from './llm';
+import { GlobeView, type GlobeHandle } from './GlobeView';
 
 type Selection = { name: string; zh: string; lat: number; lon: number; continent: string };
-type World = {
-  scene: THREE.Scene; camera: THREE.PerspectiveCamera; renderer: THREE.WebGLRenderer;
-  earthGroup: THREE.Group; earth: THREE.Mesh; marker: THREE.Mesh; highlight: THREE.LineSegments;
-  borders: THREE.LineSegments; observer: ResizeObserver;
-};
 
-/** 地理场景插件：手势旋转数字地球 → 指向选中区域 → 区位/地形/人文（内置卡 + DeepSeek 增强）。 */
+/** 地理实验 1 · 找国家：手势旋转数字地球 → 指向选中区域 → 区位/地形/人文（内置卡 + DeepSeek 问答，支持语音定位）。 */
 export function GeographyScene({ active }: SceneProps) {
   const { notify, drag } = useServices();
   const [task, setTask] = useState<'free' | 'A' | 'B'>('free');
@@ -37,10 +32,6 @@ export function GeographyScene({ active }: SceneProps) {
   const [input, setInput] = useState('');
   const chatScroll = useRef<HTMLDivElement>(null);
   const lastActivity = useRef(Date.now());
-  // 惯性旋转（挥手冲量驱动）、张开手掌悬停刹车、双手张合缩放、挥手判定。
-  const spinVel = useRef(0);
-  const pitchVel = useRef(0);
-  const brake = useRef(false);
   const swipe = useRef(new SwipeDetector());
   const swipeV = useRef(new VerticalSwipeDetector());
   const twoHandsDist = useRef<number | null>(null);
@@ -55,161 +46,49 @@ export function GeographyScene({ active }: SceneProps) {
   const pinchSince = useRef(0);
   const holdFired = useRef(false);
   const host = useRef<HTMLDivElement>(null);
-  const world = useRef<World | null>(null);
-  const live = useRef({ selected, features, graticule });
-  live.current = { selected, features, graticule };
+  const globe = useRef<GlobeHandle>(null);
+  const centroids = useRef<Map<string, { lat: number; lon: number; zh: string }>>(new Map());
+  const live = useRef({ selected, features, regionView });
+  live.current = { selected, features, regionView };
   const clue = CLUES[clueIndex];
 
   const emit = (intent: Parameters<typeof bus.emit>[0]['intent'], value?: string, source: Parameters<typeof bus.emit>[0]['source'] = 'mouse') =>
     bus.emit({ scene: 'geography', source, intent, phase: 'end', value });
 
-  useEffect(() => { loadWorld().then(setFeatures).catch(() => notify('边界数据加载失败，请检查 public/assets。')); }, [notify]);
-
-  // 三维地球：昼面贴图 + 法线 + 云层 + 大气辉光 + 星空；WebGL 不可用时降级为文字提示。
   useEffect(() => {
-    const el = host.current; if (!el) return;
-    let renderer: THREE.WebGLRenderer;
-    try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
-    catch { el.textContent = 'WebGL 不可用，请启用硬件加速。任务面板仍可使用。'; return; }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    el.appendChild(renderer.domElement);
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#050914');
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 100);
-    camera.position.set(0, 0, 3.1);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.38));
-    const sun = new THREE.DirectionalLight(0xfff4e0, 1.15); sun.position.set(5, 2, 4); scene.add(sun);
-    const loader = new THREE.TextureLoader();
-    const earthGroup = new THREE.Group(); scene.add(earthGroup);
-    const material = new THREE.MeshPhongMaterial({
-      map: loader.load('/assets/earth_atmos_2048.jpg'),
-      normalMap: loader.load('/assets/earth_normal_2048.jpg'),
-      normalScale: new THREE.Vector2(0.8, 0.8),
-      shininess: 14, specular: new THREE.Color(0x445566),
-    });
-    const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), material);
-    earthGroup.add(earth);
-    const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.012, 48, 48),
-      new THREE.MeshPhongMaterial({ map: loader.load('/assets/earth_clouds_1024.png'), transparent: true, opacity: 0.55, depthWrite: false }));
-    earthGroup.add(clouds);
-    // 大气辉光（内侧菲涅尔近似）
-    const glow = new THREE.Mesh(new THREE.SphereGeometry(1.16, 48, 48), new THREE.ShaderMaterial({
-      vertexShader: 'varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'varying vec3 vN; void main(){ float i = pow(0.62 - dot(vN, vec3(0.0,0.0,1.0)), 3.0); gl_FragColor = vec4(0.30,0.62,1.0,1.0) * i; }',
-      side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
-    }));
-    scene.add(glow);
-    // 星空
-    const starPos = new Float32Array(2400);
-    for (let i = 0; i < 800; i++) {
-      const v = new THREE.Vector3().randomDirection().multiplyScalar(18 + Math.random() * 10);
-      starPos.set([v.x, v.y, v.z], i * 3);
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xbfd4ff, size: 0.05, sizeAttenuation: true })));
-    // 经纬网（每 30°）
-    const grat = new THREE.Group(); grat.name = 'graticule'; earthGroup.add(grat);
-    const gratMat = new THREE.LineBasicMaterial({ color: 0x7ae8d4, transparent: true, opacity: 0.18 });
-    for (let lat = -60; lat <= 60; lat += 30) for (let lon = -180; lon < 180; lon += 5) {
-      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...latLonToVector3(lat, lon, 1.003)), new THREE.Vector3(...latLonToVector3(lat, lon + 5, 1.003))]);
-      grat.add(new THREE.Line(g, gratMat));
-    }
-    for (let lon = -180; lon < 180; lon += 30) for (let lat = -88; lat < 88; lat += 4) {
-      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...latLonToVector3(lat, lon, 1.003)), new THREE.Vector3(...latLonToVector3(lat + 4, lon, 1.003))]);
-      grat.add(new THREE.Line(g, gratMat));
-    }
-    // 国界线（数据加载后填充）与选中高亮
-    const borders = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x9fe8d8, transparent: true, opacity: 0.55 }));
-    earthGroup.add(borders);
-    const highlight = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xf4c784 }));
-    earthGroup.add(highlight);
-    const marker = new THREE.Mesh(new THREE.SphereGeometry(0.018, 16, 16), new THREE.MeshBasicMaterial({ color: 0xf4c784 }));
-    marker.visible = false; earthGroup.add(marker);
-    const resize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); camera.aspect = h ? w / h : 1; camera.updateProjectionMatrix(); };
-    const observer = new ResizeObserver(resize); observer.observe(el); resize();
-    let frame = 0, prev = performance.now();
-    const tick = () => {
-      frame = requestAnimationFrame(tick);
-      const now = performance.now(), dt = Math.min((now - prev) / 1000, 0.05); prev = now;
-      clouds.rotation.y += 0.0004;                       // 云层缓慢自转
-      // 惯性旋转：挥手给角速度冲量（水平=自转，竖直=俯仰），松手滑行；张开手掌悬停时强力刹车。
-      earthGroup.rotation.y += spinVel.current * dt;
-      earthGroup.rotation.x = Math.max(-1.25, Math.min(1.25, earthGroup.rotation.x + pitchVel.current * dt));
-      if (Math.abs(earthGroup.rotation.x) >= 1.25) pitchVel.current = 0;  // 到达俯仰限位即停
-      spinVel.current *= brake.current ? 0.78 : 0.985;
-      pitchVel.current *= brake.current ? 0.78 : 0.985;
-      if (Math.abs(spinVel.current) < 0.0008) spinVel.current = 0;
-      if (Math.abs(pitchVel.current) < 0.0008) pitchVel.current = 0;
-      brake.current = false;
-      renderer.render(scene, camera);
-    };
-    tick();
-    world.current = { scene, camera, renderer, earthGroup, earth, marker, highlight, borders, observer };
-    return () => { cancelAnimationFrame(frame); observer.disconnect(); renderer.dispose(); renderer.domElement.remove(); world.current = null; };
-  }, []);
-
-  // 边界数据 → 线段；选中区域 → 高亮边界与标记。
-  useEffect(() => {
-    const w = world.current; if (!w || !features) return;
-    const pts: number[] = [];
-    for (const f of features) for (const poly of (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates) as number[][][][])
-      for (const ring of poly) for (let i = 0; i + 1 < ring.length; i++) {
-        pts.push(...latLonToVector3(ring[i][1], ring[i][0], 1.004), ...latLonToVector3(ring[i + 1][1], ring[i + 1][0], 1.004));
-      }
-    w.borders.geometry.dispose();
-    w.borders.geometry = new THREE.BufferGeometry();
-    w.borders.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  }, [features]);
-  useEffect(() => {
-    const w = world.current; if (!w) return;
-    const grat = w.earthGroup.getObjectByName('graticule');
-    if (grat) grat.visible = graticule;
-    if (!selected || !features) { w.marker.visible = false; w.highlight.geometry.dispose(); w.highlight.geometry = new THREE.BufferGeometry(); return; }
-    w.marker.position.set(...latLonToVector3(selected.lat, selected.lon, 1.02));
-    w.marker.visible = true;
-    const f = features.find(x => x.properties.NAME === selected.name);
-    const pts: number[] = [];
-    if (f) for (const poly of (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates) as number[][][][])
-      for (const ring of poly) for (let i = 0; i + 1 < ring.length; i++)
-        pts.push(...latLonToVector3(ring[i][1], ring[i][0], 1.006), ...latLonToVector3(ring[i + 1][1], ring[i + 1][0], 1.006));
-    w.highlight.geometry.dispose();
-    w.highlight.geometry = new THREE.BufferGeometry();
-    w.highlight.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  }, [selected, features, graticule]);
+    loadWorld().then(f => { setFeatures(f); centroids.current = computeCentroids(f); }).catch(() => notify('边界数据加载失败，请检查 public/assets。'));
+  }, [notify]);
 
   // 选择：屏幕点 → 射线 → 球面 → 经纬度 → 区域（判定复用已测试的 findRegion）。
   const selectAt = (nx: number, ny: number) => {
-    const w = world.current; if (!w || !live.current.features) return;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(nx * 2 - 1, -(ny * 2 - 1)), w.camera);
-    const hit = ray.intersectObject(w.earth)[0];
-    if (!hit) { notify('未指向地球，请对准球体再选择。'); return; }
-    const local = w.earthGroup.worldToLocal(hit.point.clone());
-    const { lat, lon } = vector3ToLatLon([local.x, local.y, local.z]);
-    const f = findRegion(live.current.features, lon, lat);
-    if (!f) { setSelected({ name: 'ocean', zh: '海洋', lat, lon, continent: '—' }); notify(`选中海洋（${lat.toFixed(1)}°, ${lon.toFixed(1)}°）。请选择陆地区域。`); return; }
-    setSelected({ name: f.properties.NAME, zh: regionName(f), lat, lon, continent: f.properties.CONTINENT ?? '—' });
-    notify(`已选中 ${regionName(f)}（${lat.toFixed(1)}°, ${lon.toFixed(1)}°）。`);
+    const picked = globe.current?.pickAt(nx, ny);
+    const f = picked ? findRegion(live.current.features ?? [], picked.lon, picked.lat) : null;
+    if (!picked) { notify('未指向地球，请对准球体再选择。'); return; }
+    if (!f) { setSelected({ name: 'ocean', zh: '海洋', lat: picked.lat, lon: picked.lon, continent: '—' }); notify(`选中海洋（${picked.lat.toFixed(1)}°, ${picked.lon.toFixed(1)}°）。请选择陆地区域。`); return; }
+    setSelected({ name: f.properties.NAME, zh: regionName(f), lat: picked.lat, lon: picked.lon, continent: f.properties.CONTINENT ?? '—' });
+    notify(`已选中 ${regionName(f)}（${picked.lat.toFixed(1)}°, ${picked.lon.toFixed(1)}°）。`);
   };
 
-  const applyRotate = (dx: number, dy: number) => {
-    const w = world.current; if (!w) return;
-    w.earthGroup.rotation.y += dx * 4.2;
-    const next = Math.max(-1.2, Math.min(1.2, w.earthGroup.rotation.x + dy * 2.4));
-    w.earthGroup.rotation.x = next;
-  };
-  const zoom = (delta: number) => {
-    const w = world.current; if (!w) return;
-    w.camera.position.z = Math.max(1.45, Math.min(6, w.camera.position.z + delta));
-  };
+  // 场景级语音策略：全局短语未命中的识别原文 → 国名定位（纯规则匹配）。
+  useSceneVoicePolicy('geography', text => {
+    const countries = [...centroids.current.values()].map(c => ({ zh: c.zh, name: '' }));
+    const list = live.current.features?.map(f => ({ zh: regionName(f), name: f.properties.NAME })) ?? countries;
+    const hit = matchCountry(text, list);
+    if (!hit) return false;
+    const c = centroids.current.get(hit.name);
+    if (!c) return false;
+    globe.current?.flyTo(c.lat, c.lon);
+    notify(`语音定位 · ${hit.zh}（${c.lat.toFixed(0)}°, ${c.lon.toFixed(0)}°）`);
+    speak(`已定位到${hit.zh}`);
+    return true;
+  });
 
   // 手势策略（统一交互，无模式切换）：挥动=惯性旋转；捏合拖动=直接旋转；捏合点击=选中；张掌悬停=刹车；双手张合=缩放。
   useScenePolicy('geography', sample => {
-    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; pinchAnchor.current = null; pinchSince.current = 0; holdFired.current = false; return; }
+    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; pinchAnchor.current = null; pinchSince.current = 0; holdFired.current = false; globe.current?.freezeInertia(); return; }
     // 捏合开始即冻结惯性：捏合意味着精确定位，残余滑行会让选中的国家“跑掉”。
     if (sample.phase === 'start') {
-      spinVel.current = 0; pitchVel.current = 0;
+      globe.current?.freezeInertia();
       pinchAnchor.current = { x: sample.x, y: sample.y };
       pinchSince.current = performance.now(); holdFired.current = false;
       drag.current = { scene: 'geography', x: sample.x, y: sample.y };
@@ -233,31 +112,31 @@ export function GeographyScene({ active }: SceneProps) {
       const d = Math.hypot(sample.hands[0].x - sample.hands[1].x, sample.hands[0].y - sample.hands[1].y);
       if (twoHandsDist.current != null) {
         const delta = d - twoHandsDist.current;
-        if (Math.abs(delta) > 0.008) zoom(-delta * 2.4);
+        if (Math.abs(delta) > 0.008) globe.current?.zoom(-delta * 2.4);
       }
       twoHandsDist.current = d;
     } else twoHandsDist.current = null;
-    // 张开手掌悬停 0.3 秒 → 刹车。
+    // 张开手掌且悬停不动 0.3 秒 → 刹车（挥动中的张开手掌不触发，避免与挥手冲突）。
     if (sample.openPalm) {
       palmHold.current ??= { since: performance.now(), x: sample.x, y: sample.y };
       const h = palmHold.current;
-      if (Math.hypot(sample.x - h.x, sample.y - h.y) < 0.045 && performance.now() - h.since > 300) brake.current = true;
+      if (Math.hypot(sample.x - h.x, sample.y - h.y) < 0.045 && performance.now() - h.since > 300) globe.current?.brake();
     } else palmHold.current = null;
     // 挥手 → 角速度冲量（水平=自转，竖直=俯仰）。
     if (!sample.pinching && performance.now() >= swipeGraceUntil.current) {
       const dir = swipe.current.push(sample.x, sample.y, performance.now(), { pinching: false });
       if (dir) {
-        spinVel.current = Math.max(-1.6, Math.min(1.6, spinVel.current + (dir === 'right' ? 0.85 : -0.85)));
+        globe.current?.addSpin(dir === 'right' ? 1 : -1);
         notify(dir === 'right' ? '已识别向右挥手 · 地球向右旋转（张开手掌悬停可停）' : '已识别向左挥手 · 地球向左旋转（张开手掌悬停可停）');
       }
       const vdir = swipeV.current.push(sample.x, sample.y, performance.now(), { pinching: false });
       if (vdir) {
-        pitchVel.current = Math.max(-1.2, Math.min(1.2, pitchVel.current + (vdir === 'down' ? 0.6 : -0.6)));
+        globe.current?.addPitch(vdir === 'down' ? 1 : -1);
         notify(vdir === 'down' ? '已识别向下挥手 · 视角转向北半球' : '已识别向上挥手 · 视角转向南半球');
       }
     } else { swipe.current.reset(); swipeV.current.reset(); }  // 捏合中/静默期：清空轨迹
     // 捏合长按（未拖动）≈0.7 秒 → 选中并进入区域详情。
-    if (drag.current?.scene === 'geography' && sample.pinching && !holdFired.current && !regionView && pinchAnchor.current &&
+    if (drag.current?.scene === 'geography' && sample.pinching && !holdFired.current && !live.current.regionView && pinchAnchor.current &&
         Math.hypot(sample.x - pinchAnchor.current.x, sample.y - pinchAnchor.current.y) < 0.05 &&
         performance.now() - pinchSince.current > 700) {
       holdFired.current = true;
@@ -267,12 +146,12 @@ export function GeographyScene({ active }: SceneProps) {
     }
     // 捏合拖动 → 直接旋转（增量应用）。
     if (drag.current?.scene === 'geography' && sample.pinching && !holdFired.current) {
-      applyRotate(sample.x - drag.current.x, sample.y - drag.current.y);
+      globe.current?.applyRotate(sample.x - drag.current.x, sample.y - drag.current.y);
       drag.current.x = sample.x; drag.current.y = sample.y;
     }
   });
 
-  // 鼠标：拖动旋转（旋转模式）/ 点击选择（选择模式）；滚轮缩放。
+  // 鼠标：拖动旋转；单击选中；滚轮缩放。
   const pointerState = useRef<{ down: boolean; moved: number; x: number; y: number }>({ down: false, moved: 0, x: 0, y: 0 });
   const canvasPos = (e: React.PointerEvent | React.WheelEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -289,8 +168,7 @@ export function GeographyScene({ active }: SceneProps) {
       setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setChat([]); setChatView(false); setInput(''); setStreaming(false);
     }
     if (e.intent === 'predict') {
-      const target = clue.target;
-      const ok = selected?.name === target;
+      const ok = selected?.name === clue.target;
       setAnswerState(ok ? 'right' : 'wrong');
       setAnswerRegion(selected?.zh ?? '海洋');
       setCompleted(ok);
@@ -347,7 +225,7 @@ export function GeographyScene({ active }: SceneProps) {
 
   return <section className="panel geo-panel" hidden={!active}>
     <div className="task-head">
-      <div><div className="eyebrow">地理 · 数字地球</div><h2>世界地理探究</h2></div>
+      <div><div className="eyebrow">地理 · 数字地球</div><h2>实验一 · 找国家</h2></div>
       <button onClick={() => emit('reset')}>重置任务</button>
     </div>
     <div className="presets">
@@ -355,12 +233,12 @@ export function GeographyScene({ active }: SceneProps) {
       <button className={task === 'A' ? 'selected' : ''} onClick={() => { setTask('A'); emit('reset'); }}>任务 A · 线索定位</button>
       <button className={task === 'B' ? 'selected' : ''} onClick={() => { setTask('B'); emit('reset'); }}>任务 B · 区位分析</button>
     </div>
-    <div className="task-card">{task === 'free' ? '挥动旋转地球，指向国家捏合一下即可选中，进入详情查看资料与 AI 讲解。'
+    <div className="task-card">{task === 'free' ? '挥动旋转地球，指向国家捏合一下即可选中，进入详情查看资料与 AI 讲解；也可以开启语音说“定位日本”。'
       : task === 'A' ? `根据线索在地球上选中目标国家，然后点“确认作答”：${clue.clue}`
       : '选择任意区域进入详情，观察区位、地形与人文的关系，回答下方问题并提交。'}</div>
     <div className="toolbar" style={{ marginTop: 12 }}>
-      <button onClick={() => zoom(-0.35)}>放大 +</button>
-      <button onClick={() => zoom(0.35)}>缩小 −</button>
+      <button onClick={() => globe.current?.zoom(-0.35)}>放大 +</button>
+      <button onClick={() => globe.current?.zoom(0.35)}>缩小 −</button>
       <label className="small"><input type="checkbox" checked={graticule} onChange={e => setGraticule(e.target.checked)} /> 经纬网</label>
       <span className="help">挥手=旋转（左右自转、上下俯仰，有惯性）；指向国家捏合一下=选中、捏合保持≈0.7秒=直接进入详情、捏合拖动=微调旋转；张开手掌悬停≈刹车；双手张合缩放（鼠标：拖动/单击/滚轮）</span>
     </div>
@@ -374,7 +252,7 @@ export function GeographyScene({ active }: SceneProps) {
         const s = pointerState.current; if (!s.down) return;
         const p = canvasPos(e);
         s.moved = Math.max(s.moved, Math.hypot(p.x - s.x, p.y - s.y));
-        applyRotate(p.x - s.x, p.y - s.y);
+        globe.current?.applyRotate(p.x - s.x, p.y - s.y);
         s.x = p.x; s.y = p.y;
       }}
       onPointerUp={e => {
@@ -385,8 +263,9 @@ export function GeographyScene({ active }: SceneProps) {
       }}
       onWheel={e => {
         if ((e.target as HTMLElement).closest('.globe-overlay')) return; // 浮层滚动（如聊天列表）不缩放地球
-        e.preventDefault(); zoom(e.deltaY > 0 ? 0.2 : -0.2);
+        e.preventDefault(); globe.current?.zoom(e.deltaY > 0 ? 0.2 : -0.2);
       }}>
+      <GlobeView hostRef={host} ref={globe} features={features} selected={selected} graticule={graticule} />
       {regionView && selected && <div className="globe-overlay">
         <div className="overlay-head">
           <h3>{selected.zh}{selected.name !== selected.zh && selected.name !== 'ocean' ? ` · ${selected.name}` : ''}</h3>
@@ -428,16 +307,16 @@ export function GeographyScene({ active }: SceneProps) {
           <p className="help">{clue.clue}</p>
           <p>当前选中：{selected?.zh ?? '（指向国家捏合一下即可选中）'}</p>
           <button className="primary" disabled={!selected || answerState !== 'none'} onClick={() => emit('predict', selected?.zh)}>确认作答</button>
-          {answerState !== 'none' && <p className={answerState === 'right' ? 'notice' : 'notice'}>{answerState === 'right' ? '✓ 回答正确！' : `✗ 选中的是${answerRegion}，正确答案线索再读一遍。`}</p>}
+          {answerState !== 'none' && <p className="notice">{answerState === 'right' ? '✓ 回答正确！' : `✗ 选中的是${answerRegion}，正确答案线索再读一遍。`}</p>}
           <button onClick={() => { setClueIndex((clueIndex + 1) % CLUES.length); setAnswerState('none'); setAnswerRegion(''); setSelected(null); setHint(0); notify('已切换到新线索。'); }}>换一题</button>
         </> : task === 'B' ? <p>选择一个区域进入详情（或直接作答）：观察区位、地形与人文特征之间的关系，例如“地形如何影响人口分布”。</p>
-        : <p>{selected ? `已选中 ${selected.zh}（${selected.lat.toFixed(1)}°, ${selected.lon.toFixed(1)}°）` : '未选择区域。指向地球上的国家捏合一下即可选中（鼠标单击）。'}</p>}
+        : <p>{selected ? `已选中 ${selected.zh}（${selected.lat.toFixed(1)}°, ${selected.lon.toFixed(1)}°）` : '未选择区域。指向地球上的国家捏合一下即可选中（鼠标单击），或语音说“定位日本”。'}</p>}
         {selected && <button onClick={() => setRegionView(true)}>进入区域详情</button>}
       </div>
       <div className="panel result">
         <h3>② 实时观察</h3>
         <div className="big-number">{selected ? selected.lat.toFixed(0) : '—'}<small>° 纬度</small></div>
-        <p>{selected ? `经度 ${selected.lon.toFixed(1)}° · ${selected.continent}` : '旋转地球，点选区域可读出经纬度。'}</p>
+        <p>{selected ? `经度 ${selected.lon.toFixed(1)}° · ${selected.continent}` : '旋转地球，点选区域可读出经纬度；语音“定位+国名”可飞行定位。'}</p>
         <p className="help">区域判定：Natural Earth 离线边界 + 点在多边形确定性计算（国家级精度）；不依赖任何在线地图服务。</p>
       </div>
       <div className="panel hint">

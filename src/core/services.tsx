@@ -16,6 +16,8 @@ export type AppServices = {
   notify: (message: string) => void;
   cancelHand: () => void;
   registerPolicy: (scene: SceneId, handler: ((sample: HandSample) => void) | null) => void;
+  /** 场景级语音策略：全局短语未命中的识别原文转交激活场景解释；返回 true 表示已消费。 */
+  registerVoicePolicy: (scene: SceneId, handler: ((text: string) => boolean) | null) => void;
   registerSnapshot: (scene: SceneId, get: (() => Record<string, unknown>) | null) => void;
   drag: MutableRefObject<DragSession>;
 };
@@ -70,4 +72,27 @@ export function useSceneSnapshot(scene: SceneId, get: () => Record<string, unkno
     registerSnapshot(scene, () => latest.current());
     return () => registerSnapshot(scene, null);
   }, [scene, registerSnapshot]);
+}
+
+/** 场景注册语音策略：全局短语未命中的识别原文转交本场景解释。 */
+export function useSceneVoicePolicy(scene: SceneId, handler: (text: string) => boolean) {
+  const { registerVoicePolicy } = useServices();
+  const latest = useRef(handler); latest.current = handler;
+  useEffect(() => {
+    registerVoicePolicy(scene, text => latest.current(text));
+    return () => registerVoicePolicy(scene, null);
+  }, [scene, registerVoicePolicy]);
+}
+
+/** TTS 简短播报：浏览器 speechSynthesis，免 key；仅用于确认类短句。 */
+export function speak(text: string) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    synth.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 1.05;
+    synth.speak(utterance);
+  } catch { /* 无语音合成环境时静默 */ }
 }

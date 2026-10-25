@@ -1,18 +1,44 @@
-import type { SceneDefinition } from './types';
+import type { SubjectGroup, ExperimentDefinition } from './types';
 import { SlidesScene } from './slides/SlidesScene';
 import { WhiteboardScene } from './whiteboard/WhiteboardScene';
 import { GeometryScene } from './geometry/GeometryScene';
 import { PhysicsScene } from './physics/PhysicsScene';
 import { GeographyScene } from './geography/GeographyScene';
+import { DayNightScene } from './geography/DayNightScene';
 
 /**
- * 场景注册表：平台壳按此渲染导航与内容。
- * 新增学科实验时，在这里登记一行即可（对应总体设计方案“学科插件层”）。
+ * 学科注册表：每个学科下辖若干实验，平台壳按学科分组渲染导航。
+ * 新增学科实验时，在对应学科下登记一行（对应总体设计方案“学科插件层”）。
  */
-export const scenes: SceneDefinition[] = [
-  { id: 'slides', title: '课件', icon: '▤', description: '课堂放映、挥手翻页与激光笔', component: SlidesScene },
-  { id: 'whiteboard', title: '白板', icon: '✎', description: '隔空书写、画笔/橡皮与撤销', component: WhiteboardScene },
-  { id: 'geometry', title: '空间几何', icon: '◇', description: '正方体截面探究（演示 + 任务 A/B/C）', component: GeometryScene },
-  { id: 'physics', title: '力与运动', icon: '⬡', description: '力矢量拖动与牛顿仿真（演示 + 任务 A/B/C）', component: PhysicsScene },
-  { id: 'geography', title: '数字地球', icon: '◉', description: '手势旋转地球、选中区域与 AI 讲解（世界地理）', component: GeographyScene },
+export const subjects: SubjectGroup[] = [
+  {
+    id: 'tools', title: '课堂工具',
+    experiments: [
+      { id: 'slides', title: '课件', icon: '▤', description: '课堂放映、挥手翻页与激光笔', component: SlidesScene },
+      { id: 'whiteboard', title: '白板', icon: '✎', description: '隔空书写、画笔/橡皮与撤销', component: WhiteboardScene },
+    ],
+  },
+  {
+    id: 'math', title: '数学',
+    experiments: [
+      { id: 'geometry', title: '空间几何', icon: '◇', description: '正方体截面探究（演示 + 任务 A/B/C）', component: GeometryScene },
+    ],
+  },
+  {
+    id: 'physics', title: '物理',
+    experiments: [
+      { id: 'physics', title: '力与运动', icon: '⬡', description: '力矢量拖动与牛顿仿真（演示 + 任务 A/B/C）', component: PhysicsScene },
+    ],
+  },
+  {
+    id: 'geography', title: '地理 · 数字地球',
+    experiments: [
+      { id: 'geography', title: '找国家', icon: '◉', description: '手势旋转地球、选中区域与 AI 讲解（支持语音定位）', component: GeographyScene },
+      { id: 'geo-daynight', title: '晨昏线', icon: '◐', description: '昼夜半球与城市灯光，时区与晨昏线探究（演示 + 任务 A/B）', component: DayNightScene },
+    ],
+  },
 ];
+
+/** 全部实验的扁平列表（壳的主区渲染与查找用）。 */
+export const experiments: ExperimentDefinition[] = subjects.flatMap(g => g.experiments);
+export const experimentTitle = (id: string) => experiments.find(e => e.id === id)?.title ?? id;

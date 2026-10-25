@@ -3,7 +3,7 @@ import { bus, type InteractionEvent, type RecordedEvent, type SceneId } from './
 import { useHandInput, type HandSample } from './core/useHandInput';
 import { useVoiceInput } from './core/useVoiceInput';
 import { ServicesProvider, SettingsProvider, type AppServices, type DragSession, type SceneSettings } from './core/services';
-import { scenes } from './scenes/registry';
+import { subjects, experiments, experimentTitle } from './scenes/registry';
 import './styles.css';
 
 /**
@@ -34,6 +34,10 @@ export default function App() {
   const registerPolicy = useCallback((scene: SceneId, handler: ((sample: HandSample) => void) | null) => {
     if (handler) policies.current.set(scene, handler); else policies.current.delete(scene);
   }, []);
+  const voicePolicies = useRef(new Map<SceneId, (text: string) => boolean>());
+  const registerVoicePolicy = useCallback((scene: SceneId, handler: ((text: string) => boolean) | null) => {
+    if (handler) voicePolicies.current.set(scene, handler); else voicePolicies.current.delete(scene);
+  }, []);
   const registerSnapshot = useCallback((scene: SceneId, get: (() => Record<string, unknown>) | null) => {
     if (get) snapshots.current.set(scene, get); else snapshots.current.delete(scene);
   }, []);
@@ -63,11 +67,16 @@ export default function App() {
   const services = useMemo<AppServices>(() => ({
     notify: setNotice,
     cancelHand: () => hand.cancel(),
-    registerPolicy, registerSnapshot, drag,
-  }), [hand.cancel, registerPolicy, registerSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+    registerPolicy, registerVoicePolicy, registerSnapshot, drag,
+  }), [hand.cancel, registerPolicy, registerVoicePolicy, registerSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 语音命令：与手势/鼠标共用统一事件总线；翻页命令仅课件视图响应。
-  const voice = useVoiceInput(cmd => {
+  // 语音命令：全局短语走统一事件总线；未命中的原文转交激活场景的场景级语音策略。
+  const voice = useVoiceInput((cmd, text) => {
+    if (!cmd) {
+      const consumed = voicePolicies.current.get(mode)?.(text) ?? false;
+      if (!consumed) setNotice(`语音未识别命令：${text}`);
+      return;
+    }
     if (cmd.intent === 'voice-off') { voice.stop(); setNotice('语音命令已关闭。'); return; }
     if ((cmd.intent === 'next' || cmd.intent === 'previous') && mode !== 'slides') { setNotice('语音翻页只在课件视图生效。'); return; }
     if (cmd.intent === 'switch') { bus.emit({ scene: mode, source: 'voice', intent: 'switch', phase: 'end', value: cmd.value }); return; }
@@ -83,8 +92,7 @@ export default function App() {
       setLaser(false);
       const target = (e.value ?? 'slides') as SceneId;
       setMode(target);
-      const entry = scenes.find(s => s.id === target);
-      setNotice(`已切换到${entry?.title ?? target}，旧操作已结束。`);
+      setNotice(`已切换到${experimentTitle(target)}，旧操作已结束。`);
       return;
     }
     if (e.phase === 'update' || e.intent === 'point') return;
@@ -130,10 +138,14 @@ export default function App() {
             <div className="brand-cn">灵境智学</div>
             <div className="subtitle">具身学习多模态交互平台</div>
           </div>
-          <nav aria-label="场景导航">{scenes.map(s =>
-            <button key={s.id} className={mode === s.id ? 'active' : ''} title={s.description} onClick={() => bus.emit({ scene: mode, source: 'mouse', intent: 'switch', phase: 'end', value: s.id })}>
-              <span className="scene-icon">{s.icon}</span>{s.title}
-            </button>)}</nav>
+          <nav aria-label="场景导航">{subjects.map(g => (
+            <div className="nav-group" key={g.id}>
+              <div className="nav-group-title">{g.title}</div>
+              {g.experiments.map(s =>
+                <button key={s.id} className={mode === s.id ? 'active' : ''} title={s.description} onClick={() => bus.emit({ scene: mode, source: 'mouse', intent: 'switch', phase: 'end', value: s.id })}>
+                  <span className="scene-icon">{s.icon}</span>{s.title}
+                </button>)}
+            </div>))}</nav>
           <div className="sidebar-footer">
             <button className="camera-btn" disabled={hand.loading} onClick={hand.enabled ? hand.stop : hand.start}>{hand.loading ? '加载中…' : hand.enabled ? '关闭摄像头' : '启用摄像头手势'}</button>
             <button className="camera-btn" disabled={!voice.supported} title={voice.supported ? '语音命令：下一页 / 上一页 / 白板 / 课件 / 几何 / 撤销 / 重置 / 提示 / 激光笔 / 关闭语音' : '当前浏览器不支持语音识别，请使用 Edge 或 Chrome'} onClick={voice.enabled ? voice.stop : voice.start}>{voice.enabled ? '关闭语音' : '语音命令'}</button>
@@ -146,7 +158,7 @@ export default function App() {
         </aside>
         <div className="workspace">
           <div role="status" className="help notice-bar">{notice}</div>
-          <main>{scenes.map(s => <s.component key={s.id} active={mode === s.id} />)}</main>
+          <main>{experiments.map(s => <s.component key={s.id} active={mode === s.id} />)}</main>
           <details className="panel log-panel">
             <summary>交互过程记录 · {events.length} 条（仅元数据，不含画面）</summary>
             <div className="task-actions">
@@ -154,7 +166,7 @@ export default function App() {
               <button onClick={() => { if (confirm('清空当前操作记录？')) setEvents([]); }}>清空记录</button>
             </div>
             <div className="event-list">{events.map(e =>
-              <div className="event-row" key={e.id}><time>{new Date(e.time).toLocaleTimeString()}</time>{scenes.find(s => s.id === e.scene)?.title ?? e.scene} · {e.source} · {e.intent}/{e.phase} {e.value}</div>)}</div>
+              <div className="event-row" key={e.id}><time>{new Date(e.time).toLocaleTimeString()}</time>{experimentTitle(e.scene)} · {e.source} · {e.intent}/{e.phase} {e.value}</div>)}</div>
           </details>
           <footer><span>统一事件 · 规则反馈 · 可恢复操作 · 场景可插拔</span><span>首次启用手势需下载本地模型；鼠标功能可独立使用</span></footer>
         </div>

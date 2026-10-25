@@ -1,4 +1,4 @@
-﻿export type SceneId = 'slides' | 'whiteboard' | 'geometry' | 'physics' | 'geography';
+﻿export type SceneId = 'slides' | 'whiteboard' | 'geometry' | 'physics' | 'geography' | 'geo-daynight';
 export type InteractionEvent = {
   scene: SceneId; source: 'mouse' | 'hand' | 'keyboard' | 'voice' | 'system';
   intent: 'point' | 'drag' | 'next' | 'previous' | 'undo' | 'reset' | 'switch' | 'predict' | 'hint' | 'submit' | 'laser' | 'run' | 'pause';
@@ -27,7 +27,7 @@ export type VoiceIntent = { intent: 'next' | 'previous' | 'undo' | 'reset' | 'hi
 const VOICE_RULES: readonly (readonly [string, VoiceIntent])[] = [
   ['关闭语音', { intent: 'voice-off' }], ['停止语音', { intent: 'voice-off' }],
   ['下一页', { intent: 'next' }], ['上一页', { intent: 'previous' }],
-  ['白板', { intent: 'switch', value: 'whiteboard' }], ['课件', { intent: 'switch', value: 'slides' }], ['几何', { intent: 'switch', value: 'geometry' }], ['物理', { intent: 'switch', value: 'physics' }],
+  ['白板', { intent: 'switch', value: 'whiteboard' }], ['课件', { intent: 'switch', value: 'slides' }], ['几何', { intent: 'switch', value: 'geometry' }], ['物理', { intent: 'switch', value: 'physics' }], ['晨昏线', { intent: 'switch', value: 'geo-daynight' }], ['地球', { intent: 'switch', value: 'geography' }], ['地理', { intent: 'switch', value: 'geography' }],
   ['撤销', { intent: 'undo' }], ['重置', { intent: 'reset' }], ['提示', { intent: 'hint' }], ['激光笔', { intent: 'laser' }],
   ['开始', { intent: 'run' }], ['暂停', { intent: 'pause' }],
 ];

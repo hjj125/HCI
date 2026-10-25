@@ -22,15 +22,15 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-const navGeo = () => fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+const navGeo = () => fireEvent.click(screen.getByRole('button', { name: /◉\s*找国家/ }));
 
-describe('地理 · 数字地球场景', () => {
+describe('地理 · 找国家场景', () => {
   it('场景接入：任务页签、操作模式与经纬网开关渲染正常', () => {
     render(<App />);
     navGeo();
-    expect(screen.getByText('世界地理探究')).toBeTruthy();
+    expect(screen.getByText('实验一 · 找国家')).toBeTruthy();
     expect(screen.getByRole('button', { name: '任务 A · 线索定位' })).toBeTruthy();
-    expect(screen.getByLabelText(/经纬网/)).toBeTruthy();
+    expect(screen.getAllByLabelText(/经纬网/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: '演示模式' })).toBeTruthy();
   });
 

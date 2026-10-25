@@ -64,3 +64,32 @@ export const CLUES: Clue[] = [
 export function lookupByLatLon(features: RegionFeature[], lat: number, lon: number) {
   return findRegion(features, lon, lat);
 }
+
+/** 各国质心（多边形顶点平均，供语音定位 flyTo 使用）。 */
+export function computeCentroids(features: RegionFeature[]): Map<string, { lat: number; lon: number; zh: string }> {
+  const map = new Map<string, { lat: number; lon: number; zh: string }>();
+  for (const f of features) {
+    let latSum = 0, lonSum = 0, n = 0;
+    for (const poly of (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates) as number[][][][])
+      for (const ring of poly) for (let i = 0; i < ring.length; i += 4) { latSum += ring[i][1]; lonSum += ring[i][0]; n++; }
+    if (n) map.set(f.properties.NAME, { lat: latSum / n, lon: lonSum / n, zh: regionName(f) });
+  }
+  return map;
+}
+
+/** 语音国名定位的纯规则匹配（可单测）：
+ *  “定位日本 / 去埃及 / 找到巴西 / 看看澳大利亚”与裸国名均可；最长国名优先，
+ *  避免“刚果民主共和国”被“刚果”截断；未命中返回 null。 */
+export function matchCountry(text: string, countries: { zh: string; name: string }[]): { zh: string; name: string } | null {
+  const t = text.replace(/\s/g, '');
+  const longestIn = (s: string) => {
+    let best: { zh: string; name: string } | null = null;
+    for (const c of countries) if (s.includes(c.zh) && (!best || c.zh.length > best.zh.length)) best = c;
+    return best;
+  };
+  for (const verb of ['定位', '找到', '去看看', '看看', '飞到', '去', '打开']) {
+    const i = t.indexOf(verb);
+    if (i >= 0) { const hit = longestIn(t.slice(i + verb.length)); if (hit) return hit; }
+  }
+  return longestIn(t);
+}

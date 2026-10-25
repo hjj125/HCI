@@ -3,10 +3,11 @@ import { matchVoiceCommand, type VoiceIntent } from './interaction';
 
 /**
  * 有限语音命令：浏览器 Web Speech API（Edge/Chrome），中文连续识别。
- * 识别到命令短语后交给回调，由 App 转成统一交互事件——与手势/鼠标共用同一事件总线。
+ * 识别文本先匹配全局命令短语（matchVoiceCommand）；未命中时把原文交给回调
+ * （cmd 为 null），由激活场景的场景级语音策略自行解释（如地理的国名定位）。
  * 语音为显式启用；识别服务由浏览器提供，本应用不保存任何音频或转写。
  */
-export function useVoiceInput(onCommand: (cmd: VoiceIntent) => void) {
+export function useVoiceInput(onCommand: (cmd: VoiceIntent | null, heard: string) => void) {
   const callback = useRef(onCommand); callback.current = onCommand;
   const recognition = useRef<{ start(): void; stop(): void; abort(): void } | null>(null);
   const enabled = useRef(false);
@@ -34,8 +35,8 @@ export function useVoiceInput(onCommand: (cmd: VoiceIntent) => void) {
           if (!text) continue;
           setLastHeard(text);
           const cmd = matchVoiceCommand(text);
-          if (cmd) { setStatus(`已执行：${text}`); callback.current(cmd); }
-          else setStatus(`未识别命令：${text}`);
+          if (cmd) { setStatus(`已执行：${text}`); callback.current(cmd, text); }
+          else { setStatus(`转交场景：${text}`); callback.current(null, text); }
         } else interim += text;
       }
       if (interim.trim()) setLastHeard(interim.trim());

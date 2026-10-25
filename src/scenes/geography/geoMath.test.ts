@@ -62,3 +62,23 @@ describe('区域查找', () => {
     expect(findRegion(fixture, 0, 0)).toBeNull();
   });
 });
+
+import { matchCountry } from './regionData';
+describe('语音国名定位匹配', () => {
+  const list = [
+    { zh: '日本', name: 'Japan' }, { zh: '埃及', name: 'Egypt' }, { zh: '巴西', name: 'Brazil' },
+    { zh: '澳大利亚', name: 'Australia' }, { zh: '刚果', name: 'Congo' }, { zh: '刚果民主共和国', name: 'Dem. Rep. Congo' },
+    { zh: '中华人民共和国', name: 'China' },
+  ];
+  it('动词前缀与裸国名均可命中', () => {
+    expect(matchCountry('定位日本', list)!.name).toBe('Japan');
+    expect(matchCountry('我想看看澳大利亚', list)!.name).toBe('Australia');
+    expect(matchCountry('埃及', list)!.name).toBe('Egypt');
+    expect(matchCountry('请飞到巴西，谢谢', list)!.name).toBe('Brazil');
+  });
+  it('最长国名优先，未含国名返回 null', () => {
+    expect(matchCountry('去刚果民主共和国', list)!.name).toBe('Dem. Rep. Congo');
+    expect(matchCountry('定位中国', list)).toBeNull(); // “中国”非完整中文名“中华人民共和国”
+    expect(matchCountry('今天天气不错', list)).toBeNull();
+  });
+});

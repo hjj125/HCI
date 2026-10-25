@@ -39,17 +39,17 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); hand.emit = null; });
 
-describe('数字地球手势', () => {
+describe('找国家手势', () => {
   it('单手向右挥动给地球旋转冲量并给出反馈', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+    fireEvent.click(screen.getByRole('button', { name: /◉\s*找国家/ }));
     await wave(0.2, 0.72);
     await waitFor(() => expect(notice()).toContain('已识别向右挥手 · 地球向右旋转'));
   });
 
   it('向下挥动给俯仰冲量并提示转向北半球', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+    fireEvent.click(screen.getByRole('button', { name: /◉\s*找国家/ }));
     // 垂直挥手：y 从 0.35 → 0.75（屏幕坐标向下）
     const steps = 8, gap = 35;
     for (let i = 0; i < steps; i++) {
@@ -62,7 +62,7 @@ describe('数字地球手势', () => {
 
   it('捏合选中国家后撤手不会带动地球旋转（撤手静默期）', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+    fireEvent.click(screen.getByRole('button', { name: /◉\s*找国家/ }));
     // 捏合选择：start → end
     act(() => hand.emit!({ x: .5, y: .4, phase: 'start', pinching: true }));
     act(() => hand.emit!({ x: .5, y: .4, phase: 'end', pinching: false }));
@@ -74,7 +74,7 @@ describe('数字地球手势', () => {
 
   it('捏合长按 0.7 秒直接进入区域详情', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /◉s*数字地球/ }));
+    fireEvent.click(screen.getByRole('button', { name: /◉s*找国家/ }));
     act(() => hand.emit!({ x: .5, y: .4, phase: 'start', pinching: true }));
     for (let i = 0; i < 10; i++) {
       act(() => hand.emit!({ x: .5 + (Math.random() - .5) * 0.01, y: .4, phase: 'update', pinching: true }));
@@ -85,12 +85,12 @@ describe('数字地球手势', () => {
 
   it('双手张合样本与张开手掌悬停不导致崩溃（缩放在 WebGL 不可用时安全跳过）', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: /◉\s*数字地球/ }));
+    fireEvent.click(screen.getByRole('button', { name: /◉\s*找国家/ }));
     act(() => hand.emit!({ x: .3, y: .4, phase: 'update', pinching: false, hands: [{ x: .3, y: .5 }, { x: .6, y: .5 }], openPalm: true }));
     await sleep(50);
     act(() => hand.emit!({ x: .3, y: .4, phase: 'update', pinching: false, hands: [{ x: .3, y: .5 }, { x: .7, y: .5 }], openPalm: true }));
     await sleep(50);
-    expect(screen.getByText('世界地理探究')).toBeTruthy();   // 页面仍然健康
+    expect(screen.getByText('实验一 · 找国家')).toBeTruthy();   // 页面仍然健康
     expect(notice()).not.toContain('不可用');
   });
 });
