@@ -4,6 +4,7 @@ import type { SceneProps } from '../types';
 import { speak, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
 import { findRegion, type RegionFeature } from './geoMath';
 import { loadWorld, regionName, cardFor, CLUES, computeCentroids, matchCountry } from './regionData';
+import { resolveCapital, type Capital } from './capitals';
 import { SwipeDetector, VerticalSwipeDetector } from '../slides/pptGesture';
 import { streamRegionChat, type ChatMessage } from './llm';
 import { GlobeView, type GlobeHandle } from './GlobeView';
@@ -30,6 +31,7 @@ export function GeographyScene({ active }: SceneProps) {
   const [streaming, setStreaming] = useState(false);
   const [chatView, setChatView] = useState(false);
   const [input, setInput] = useState('');
+  const [asking, setAsking] = useState<string | null>(null); // “正在询问 AI”弹窗状态（值为区域名）
   const chatScroll = useRef<HTMLDivElement>(null);
   const lastActivity = useRef(Date.now());
   const swipe = useRef(new SwipeDetector());
@@ -64,9 +66,10 @@ export function GeographyScene({ active }: SceneProps) {
     const picked = globe.current?.pickAt(nx, ny);
     const f = picked ? findRegion(live.current.features ?? [], picked.lon, picked.lat) : null;
     if (!picked) { notify('未指向地球，请对准球体再选择。'); return; }
-    if (!f) { setSelected({ name: 'ocean', zh: '海洋', lat: picked.lat, lon: picked.lon, continent: '—' }); notify(`选中海洋（${picked.lat.toFixed(1)}°, ${picked.lon.toFixed(1)}°）。请选择陆地区域。`); return; }
+    if (!f) { setSelected({ name: 'ocean', zh: '海洋', lat: picked.lat, lon: picked.lon, continent: '—' }); setGlobeMarker(null); setCapitalInfo(null); notify(`选中海洋（${picked.lat.toFixed(1)}°, ${picked.lon.toFixed(1)}°）。请选择陆地区域。`); return; }
     setSelected({ name: f.properties.NAME, zh: regionName(f), lat: picked.lat, lon: picked.lon, continent: f.properties.CONTINENT ?? '—' });
     notify(`已选中 ${regionName(f)}（${picked.lat.toFixed(1)}°, ${picked.lon.toFixed(1)}°）。`);
+    void placeCapitalMarker(regionName(f), f.properties.NAME, f.properties.CONTINENT ?? '—');
   };
 
   // 场景级语音策略：全局短语未命中的识别原文 → 国名定位（纯规则匹配）。
@@ -79,9 +82,11 @@ export function GeographyScene({ active }: SceneProps) {
     const c = centroids.current.get(hit.name);
     if (!c) return false;
     globe.current?.flyTo(c.lat, c.lon);
-    // 黄色标记停在国家的位置（质心），后续由人继续手势操控。
-    setSelected({ name: hit.name, zh: hit.zh, lat: c.lat, lon: c.lon, continent: live.current.features?.find(f => f.properties.NAME === hit.name)?.properties.CONTINENT ?? '—' });
+    // 黄色标记落在首都（内置表/缓存/DeepSeek 兜底）；飞行先到国家质心看全貌。
+    const continent = live.current.features?.find(f => f.properties.NAME === hit.name)?.properties.CONTINENT ?? '—';
+    setSelected({ name: hit.name, zh: hit.zh, lat: c.lat, lon: c.lon, continent });
     notify(`语音定位 · ${hit.zh}（${c.lat.toFixed(0)}°, ${c.lon.toFixed(0)}°）`);
+    void placeCapitalMarker(hit.zh, hit.name, continent);
     const now = performance.now();
     if (lastSpoken.current.text !== hit.zh || now - lastSpoken.current.at > 10000) {
       lastSpoken.current = { text: hit.zh, at: now };
@@ -159,6 +164,18 @@ export function GeographyScene({ active }: SceneProps) {
     }
   });
 
+  /** 首都标记：内置表/缓存立即可用；未命中时询问 DeepSeek（弹窗提示）并缓存。 */
+  const placeCapitalMarker = async (zh: string, name: string, continent: string) => {
+    const r = await resolveCapital(zh, name, () => setAsking(zh));
+    setAsking(null);
+    if (!r) return;
+    if (live.current.selected?.name !== name) return; // 用户已切到别处
+    setGlobeMarker({ name, lat: r.capital.lat, lon: r.capital.lon });
+    setCapitalInfo({ name, zh: r.capital.zh, lat: r.capital.lat, lon: r.capital.lon, continent, source: r.source });
+  };
+  const [globeMarker, setGlobeMarker] = useState<{ name: string; lat: number; lon: number } | null>(null);
+  const [capitalInfo, setCapitalInfo] = useState<(Selection & { source: string }) | null>(null);
+
   // 鼠标：拖动旋转；单击选中；滚轮缩放。
   const pointerState = useRef<{ down: boolean; moved: number; x: number; y: number }>({ down: false, moved: 0, x: 0, y: 0 });
   const canvasPos = (e: React.PointerEvent | React.WheelEvent) => {
@@ -172,7 +189,7 @@ export function GeographyScene({ active }: SceneProps) {
     if (e.intent === 'hint') setHint(v => Math.min(2, v + 1));
     if (e.intent === 'reset') {
       // 任务切换按钮会先 setTask 再 emit reset：这里不重置 task，只清作答状态。
-      setSelected(null); setRegionView(false); setAnswerState('none'); setAnswerRegion('');
+      setSelected(null); setRegionView(false); setAnswerState('none'); setAnswerRegion(''); setGlobeMarker(null); setCapitalInfo(null);
       setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setChat([]); setChatView(false); setInput(''); setStreaming(false);
     }
     if (e.intent === 'predict') {
@@ -273,7 +290,8 @@ export function GeographyScene({ active }: SceneProps) {
         if ((e.target as HTMLElement).closest('.globe-overlay')) return; // 浮层滚动（如聊天列表）不缩放地球
         e.preventDefault(); globe.current?.zoom(e.deltaY > 0 ? 0.2 : -0.2);
       }}>
-      <GlobeView hostRef={host} ref={globe} features={features} selected={selected} graticule={graticule} />
+      <GlobeView hostRef={host} ref={globe} features={features} selected={globeMarker ?? selected} graticule={graticule} />
+      {asking && <div className="ai-asking" role="status">正在询问 AI · {asking} 的首都…</div>}
       {regionView && selected && <div className="globe-overlay">
         <div className="overlay-head">
           <h3>{selected.zh}{selected.name !== selected.zh && selected.name !== 'ocean' ? ` · ${selected.name}` : ''}</h3>
@@ -325,6 +343,7 @@ export function GeographyScene({ active }: SceneProps) {
         <h3>② 实时观察</h3>
         <div className="big-number">{selected ? selected.lat.toFixed(0) : '—'}<small>° 纬度</small></div>
         <p>{selected ? `经度 ${selected.lon.toFixed(1)}° · ${selected.continent}` : '旋转地球，点选区域可读出经纬度；语音“定位+国名”可飞行定位。'}</p>
+        {capitalInfo && <p className="help">★ 首都：{capitalInfo.zh}（{capitalInfo.lat.toFixed(1)}°, {capitalInfo.lon.toFixed(1)}°）{capitalInfo.source === 'ai' ? ' · AI 提供' : ''}</p>}
         <p className="help">区域判定：Natural Earth 离线边界 + 点在多边形确定性计算（国家级精度）；不依赖任何在线地图服务。</p>
       </div>
       <div className="panel hint">

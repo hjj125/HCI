@@ -37,6 +37,35 @@ function systemPrompt(region: string, continent: string): string {
     + '之后每条回复不超过 150 字，鼓励学生观察与探究。';
 }
 
+/** 询问 DeepSeek 某国首都名与坐标（非流式，一次性 JSON）。返回 null 表示失败。 */
+export async function askCapital(region: string, apiKey: string): Promise<{ capital: string; lat: number; lon: number } | null> {
+  const baseUrl = readEnv('DEEPSEEK_BASE_URL') ?? 'https://api.deepseek.com';
+  const model = readEnv('DEEPSEEK_MODEL') ?? 'deepseek-chat';
+  const res = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: '你是地理数据助手。只输出 JSON，格式：{"capital":"首都中文名","lat":数字纬度,"lon":数字经度}，不要任何其他文字。' },
+        { role: 'user', content: '给出' + region + '的首都中文名与经纬度坐标（WGS84）。' },
+      ],
+      temperature: 0, max_tokens: 100,
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) return null;
+  try {
+    const raw: string = (await res.json())?.choices?.[0]?.message?.content ?? '';
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const data = JSON.parse(m[0]);
+    const lat = Number(data.lat), lon = Number(data.lon);
+    if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return { capital: String(data.capital ?? ''), lat, lon };
+  } catch { return null; }
+}
+
 /** 调用 DeepSeek 并以异步迭代器逐段产出增量文本（可注入替换以便测试）。 */
 export async function* callDeepSeekStream(region: string, continent: string, messages: ChatMessage[], apiKey: string): AsyncGenerator<string> {
   const baseUrl = readEnv('DEEPSEEK_BASE_URL') ?? 'https://api.deepseek.com';
@@ -80,6 +109,7 @@ export async function* callDeepSeekStream(region: string, continent: string, mes
 
 export function createLlmMiddleware(
   stream: (region: string, continent: string, messages: ChatMessage[], apiKey: string) => AsyncGenerator<string> = callDeepSeekStream,
+  options: { apiKey?: string; askCapital?: (region: string, apiKey: string) => Promise<{ capital: string; lat: number; lon: number } | null> } = {},
 ): Connect.NextHandleFunction {
   let lastCall = 0, dailyCount = 0, dailyReset = new Date().toDateString();
   return async (req, res) => {
@@ -97,8 +127,10 @@ export function createLlmMiddleware(
     }
     const url = new URL(req.url ?? '/', 'http://localhost');
     // 兼容挂载时已剥前缀（/chat）与全路径（/api/llm/chat）两种形式。
-    if (req.method !== 'POST' || !url.pathname.endsWith('/chat')) { send(400, { error: '无效的 AI 请求。' }); return; }
+    // /chat：流式讲解；/capital：一次性首都坐标查询（同一限流与额度）。
+    if (req.method !== 'POST' || (!url.pathname.endsWith('/chat') && !url.pathname.endsWith('/capital'))) { send(400, { error: '无效的 AI 请求。' }); return; }
     const apiKey = readEnv('DEEPSEEK_API_KEY');
+    const askCap = options.askCapital ?? askCapital;
     if (!apiKey) { send(503, { configured: false, error: 'AI 讲解未配置：请在项目根目录 .env 填入 DEEPSEEK_API_KEY 并重启服务（见 README）。' }); return; }
     if (Date.now() - lastCall < 800) { send(429, { error: '请求过于频繁，请稍候。' }); return; }
     const today = new Date().toDateString();
@@ -114,8 +146,20 @@ export function createLlmMiddleware(
       continent = String(parsed.continent ?? '该大洲').slice(0, 40);
       if (Array.isArray(parsed.messages)) messages = parsed.messages.slice(-10);
     } catch { /* 保持默认 */ }
-    if (!region || messages.length === 0) { send(400, { error: '缺少区域或提问内容。' }); return; }
+    if (!region) { send(400, { error: '缺少区域名称。' }); return; }
+    if (!url.pathname.endsWith('/capital')) {
+      if (messages.length === 0) { send(400, { error: '缺少提问内容。' }); return; }
+    }
     lastCall = Date.now(); dailyCount++;
+    // /capital：一次性 JSON 返回首都坐标（DeepSeek 兜底，内置表/缓存在前端）。
+    if (url.pathname.endsWith('/capital')) {
+      try {
+        const cap = await askCap(region, apiKey);
+        if (cap) { res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.end(JSON.stringify(cap)); }
+        else send(502, { error: 'AI 首都查询失败，请稍后重试。' });
+      } catch { send(502, { error: 'AI 首都查询异常。' }); }
+      return;
+    }
     // SSE 流式响应：逐段转发增量文本。
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
