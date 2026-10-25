@@ -201,6 +201,9 @@ export function GeographyScene({ active }: SceneProps) {
   // 手势策略：挥手旋转（带惯性）/ 张掌悬停刹车 / 双手张合缩放 / 捏合拖动 / 捏合点击选区。
   useScenePolicy('geography', sample => {
     if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; return; }
+    // 捏合开始即冻结惯性：捏合意味着精确定位（选择/微调），
+    // 残余的滑行速度若不清零，松手后地球会继续转，选中的国家“跑掉”。
+    if (sample.phase === 'start') { spinVel.current = 0; pitchVel.current = 0; }
     if (sample.phase === 'end') { swipeGraceUntil.current = performance.now() + 1200; swipe.current.reset(); swipeV.current.reset(); }
     // 双手张合 → 缩放：双手距离增大=放大（靠近），减小=缩小。
     if (sample.hands && sample.hands.length >= 2) {
