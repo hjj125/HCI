@@ -57,3 +57,15 @@
 .fn-host{margin-top:14px}.fn-host canvas{width:100%;height:auto;display:block;background:#0c1727;border-radius:10px;touch-action:none}
 .moon-disc{width:130px;height:130px;display:block;border-radius:50%}
 .al-match{color:#8bf2d6}.al-wrong{color:#ffd76a;border-bottom:2px solid #ffd76a}.al-missing{color:#5a6d8c;border-bottom:2px dotted #5a6d8c}.al-extra{color:#ff8a80;border-bottom:2px solid #ff8a80}
+/* 精致滚动条：全局细圆角、无箭头；侧栏拇指默认隐形，悬停浮现 */
+*{scrollbar-width:thin;scrollbar-color:#24384f transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#24384f;border-radius:99px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background-color:#33507a}
+::-webkit-scrollbar-button,::-webkit-scrollbar-corner{display:none}
+.sidebar{scrollbar-color:transparent transparent}
+.sidebar:hover{scrollbar-color:#24384f transparent}
+.sidebar::-webkit-scrollbar-thumb{background-color:transparent}
+.sidebar:hover::-webkit-scrollbar-thumb{background-color:#33507a}
+.sidebar:hover::-webkit-scrollbar-thumb:hover{background-color:#43618c}
