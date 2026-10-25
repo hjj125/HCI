@@ -65,6 +65,25 @@ export function lookupByLatLon(features: RegionFeature[], lat: number, lon: numb
   return findRegion(features, lon, lat);
 }
 
+
+/** 常用国家简称 → GeoJSON 正式中文名（NAME_ZH）。匹配时先用别名展开再查。 */
+const ALIASES: Record<string, string> = {
+  '中国': '中华人民共和国', '美国': '美国', '英国': '英国', '法国': '法国', '德国': '德国',
+  '韩国': '大韩民国', '朝鲜': '朝鲜', '南非': '南非', '新西兰': '新西兰', '澳洲': '澳大利亚',
+  '俄罗斯': '俄罗斯', '印度': '印度', '埃及': '埃及', '巴西': '巴西', '阿根廷': '阿根廷',
+  '加拿大': '加拿大', '墨西哥': '墨西哥', '日本': '日本', '意大利': '意大利', '西班牙': '西班牙',
+  '荷兰': '荷兰', '瑞士': '瑞士', '瑞典': '瑞典', '挪威': '挪威', '芬兰': '芬兰',
+  '波兰': '波兰', '土耳其': '土耳其', '希腊': '希腊', '葡萄牙': '葡萄牙', '泰国': '泰国',
+  '越南': '越南', '缅甸': '缅甸', '印尼': '印度尼西亚', '菲律宾': '菲律宾', '马来西亚': '马来西亚',
+  '沙特': '沙特阿拉伯', '伊朗': '伊朗', '伊拉克': '伊拉克', '以色列': '以色列', '智利': '智利',
+  '秘鲁': '秘鲁', '哥伦比亚': '哥伦比亚', '古巴': '古巴', '乌克兰': '乌克兰', '捷克': '捷克',
+  '匈牙利': '匈牙利', '奥地利': '奥地利', '比利时': '比利时', '丹麦': '丹麦', '爱尔兰': '爱尔兰',
+  '冰岛': '冰岛', '摩洛哥': '摩洛哥', '阿尔及利亚': '阿尔及利亚', '利比亚': '利比亚', '苏丹': '苏丹',
+  '埃塞俄比亚': '埃塞俄比亚', '肯尼亚': '肯尼亚', '尼日利亚': '尼日利亚', '坦桑尼亚': '坦桑尼亚',
+  '蒙古': '蒙古', '巴基斯坦': '巴基斯坦', '孟加拉国': '孟加拉国', '斯里兰卡': '斯里兰卡', '尼泊尔': '尼泊尔',
+  '哈萨克斯坦': '哈萨克斯坦', '阿富汗': '阿富汗', '新加坡': '新加坡', '柬埔寨': '柬埔寨', '老挝': '老挝',
+};
+
 /** 各国质心（多边形顶点平均，供语音定位 flyTo 使用）。 */
 export function computeCentroids(features: RegionFeature[]): Map<string, { lat: number; lon: number; zh: string }> {
   const map = new Map<string, { lat: number; lon: number; zh: string }>();
@@ -78,18 +97,29 @@ export function computeCentroids(features: RegionFeature[]): Map<string, { lat: 
 }
 
 /** 语音国名定位的纯规则匹配（可单测）：
- *  “定位日本 / 去埃及 / 找到巴西 / 看看澳大利亚”与裸国名均可；最长国名优先，
- *  避免“刚果民主共和国”被“刚果”截断；未命中返回 null。 */
+ *  “定位日本 / 去埃及 / 找到巴西 / 看看澳大利亚”与裸国名（含常用简称，如“中国”）均可；
+ *  最长正式名优先，避免“刚果民主共和国”被“刚果”截断；未命中返回 null。 */
 export function matchCountry(text: string, countries: { zh: string; name: string }[]): { zh: string; name: string } | null {
   const t = text.replace(/\s/g, '');
-  const longestIn = (s: string) => {
+  const candidates: { zh: string; name: string }[] = [];
+  const push = (s: string) => {
     let best: { zh: string; name: string } | null = null;
     for (const c of countries) if (s.includes(c.zh) && (!best || c.zh.length > best.zh.length)) best = c;
-    return best;
+    if (best) candidates.push(best);
   };
   for (const verb of ['定位', '找到', '去看看', '看看', '飞到', '去', '打开']) {
     const i = t.indexOf(verb);
-    if (i >= 0) { const hit = longestIn(t.slice(i + verb.length)); if (hit) return hit; }
+    if (i >= 0) push(t.slice(i + verb.length));
   }
-  return longestIn(t);
+  push(t);
+  // 常用简称（“中国”→“中华人民共和国”等）映射到正式名。
+  for (const [alias, full] of Object.entries(ALIASES)) {
+    if (t.includes(alias)) {
+      const c = countries.find(x => x.zh === full);
+      if (c) candidates.push(c);
+    }
+  }
+  // 最长正式名优先：先正式名匹配，别名命中兜底。
+  const formal = candidates.slice(0, candidates.length);
+  return formal.find(c => !ALIASES[c.zh] === false) ?? formal[0] ?? null;
 }

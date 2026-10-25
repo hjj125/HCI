@@ -78,7 +78,7 @@ describe('语音国名定位匹配', () => {
   });
   it('最长国名优先，未含国名返回 null', () => {
     expect(matchCountry('去刚果民主共和国', list)!.name).toBe('Dem. Rep. Congo');
-    expect(matchCountry('定位中国', list)).toBeNull(); // “中国”非完整中文名“中华人民共和国”
+    expect(matchCountry('定位中国', list)!.name).toBe('China'); // 常用简称经别名表命中
     expect(matchCountry('今天天气不错', list)).toBeNull();
   });
 });

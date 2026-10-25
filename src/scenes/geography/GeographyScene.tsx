@@ -70,16 +70,23 @@ export function GeographyScene({ active }: SceneProps) {
   };
 
   // 场景级语音策略：全局短语未命中的识别原文 → 国名定位（纯规则匹配）。
+  // 播报去重：同一短语 3 秒内只播一次（识别引擎对同段语音可能多次回调）。
+  const lastSpoken = useRef({ text: '', at: 0 });
   useSceneVoicePolicy('geography', text => {
-    const countries = [...centroids.current.values()].map(c => ({ zh: c.zh, name: '' }));
-    const list = live.current.features?.map(f => ({ zh: regionName(f), name: f.properties.NAME })) ?? countries;
+    const list = live.current.features?.map(f => ({ zh: regionName(f), name: f.properties.NAME })) ?? [];
     const hit = matchCountry(text, list);
     if (!hit) return false;
     const c = centroids.current.get(hit.name);
     if (!c) return false;
     globe.current?.flyTo(c.lat, c.lon);
+    // 黄色标记停在国家的位置（质心），后续由人继续手势操控。
+    setSelected({ name: hit.name, zh: hit.zh, lat: c.lat, lon: c.lon, continent: live.current.features?.find(f => f.properties.NAME === hit.name)?.properties.CONTINENT ?? '—' });
     notify(`语音定位 · ${hit.zh}（${c.lat.toFixed(0)}°, ${c.lon.toFixed(0)}°）`);
-    speak(`已定位到${hit.zh}`);
+    const now = performance.now();
+    if (lastSpoken.current.text !== hit.zh || now - lastSpoken.current.at > 3000) {
+      lastSpoken.current = { text: hit.zh, at: now };
+      speak(`已定位到${hit.zh}`);
+    }
     return true;
   });
 
