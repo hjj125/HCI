@@ -68,9 +68,11 @@ export default function App() {
     notify: setNotice,
     cancelHand: () => hand.cancel(),
     registerPolicy, registerVoicePolicy, registerSnapshot, drag,
+    pauseRecognition: ms => voiceCtl.current?.(ms),
   }), [hand.cancel, registerPolicy, registerVoicePolicy, registerSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 语音命令：全局短语走统一事件总线；未命中的原文转交激活场景的场景级语音策略。
+  const voiceCtl = useRef<((ms: number) => void) | null>(null);
   const voice = useVoiceInput((cmd, text) => {
     if (!cmd) {
       const consumed = voicePolicies.current.get(mode)?.(text) ?? false;
@@ -82,6 +84,7 @@ export default function App() {
     if (cmd.intent === 'switch') { bus.emit({ scene: mode, source: 'voice', intent: 'switch', phase: 'end', value: cmd.value }); return; }
     bus.emit({ scene: mode, source: 'voice', intent: cmd.intent, phase: 'end' });
   });
+  voiceCtl.current = voice.pauseFor ?? null;
 
   // 全局语义事件：场景切换、学习记录。学科逻辑由各场景插件自行订阅处理。
   useEffect(() => bus.subscribe(e => {

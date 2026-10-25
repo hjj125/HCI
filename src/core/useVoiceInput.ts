@@ -15,6 +15,13 @@ export function useVoiceInput(onCommand: (cmd: VoiceIntent | null, heard: string
   const [active, setActive] = useState(false);
   const [status, setStatus] = useState('未启用');
   const [lastHeard, setLastHeard] = useState('');
+  // TTS 播报期间暂停识别（喇叭声音会被麦克风听回去造成误识别循环）；播报结束自动恢复。
+  const pauseFor = useCallback((ms: number) => {
+    const r = recognition.current as { stop(): void; start(): void } | null;
+    if (!r || !enabled.current) return;
+    try { r.stop(); } catch { /* 已停止 */ }
+    setTimeout(() => { if (enabled.current) { try { r.start(); } catch { /* 重复启动 */ } } }, ms);
+  }, []);
   const stop = useCallback(() => {
     enabled.current = false;
     try { recognition.current?.stop(); } catch { /* 已停止 */ }
@@ -56,5 +63,5 @@ export function useVoiceInput(onCommand: (cmd: VoiceIntent | null, heard: string
     setSupported(!!(w.SpeechRecognition ?? w.webkitSpeechRecognition));
     return () => { enabled.current = false; try { recognition.current?.abort(); } catch { /* 忽略 */ } };
   }, []);
-  return { supported, enabled: active, status, lastHeard, start, stop };
+  return { supported, enabled: active, status, lastHeard, start, stop, pauseFor };
 }

@@ -12,7 +12,7 @@ type Selection = { name: string; zh: string; lat: number; lon: number; continent
 
 /** 地理实验 1 · 找国家：手势旋转数字地球 → 指向选中区域 → 区位/地形/人文（内置卡 + DeepSeek 问答，支持语音定位）。 */
 export function GeographyScene({ active }: SceneProps) {
-  const { notify, drag } = useServices();
+  const { notify, drag, pauseRecognition } = useServices();
   const [task, setTask] = useState<'free' | 'A' | 'B'>('free');
   const [features, setFeatures] = useState<RegionFeature[] | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -83,9 +83,10 @@ export function GeographyScene({ active }: SceneProps) {
     setSelected({ name: hit.name, zh: hit.zh, lat: c.lat, lon: c.lon, continent: live.current.features?.find(f => f.properties.NAME === hit.name)?.properties.CONTINENT ?? '—' });
     notify(`语音定位 · ${hit.zh}（${c.lat.toFixed(0)}°, ${c.lon.toFixed(0)}°）`);
     const now = performance.now();
-    if (lastSpoken.current.text !== hit.zh || now - lastSpoken.current.at > 3000) {
+    if (lastSpoken.current.text !== hit.zh || now - lastSpoken.current.at > 10000) {
       lastSpoken.current = { text: hit.zh, at: now };
-      speak(`已定位到${hit.zh}`);
+      const ms = speak(`已定位到${hit.zh}`);
+      if (ms) pauseRecognition(ms + 800); // 播报期间暂停识别：防止喇叭声音被麦克风回听再触发
     }
     return true;
   });
