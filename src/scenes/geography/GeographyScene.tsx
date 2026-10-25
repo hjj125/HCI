@@ -19,7 +19,6 @@ type World = {
 export function GeographyScene({ active }: SceneProps) {
   const { notify, drag } = useServices();
   const [task, setTask] = useState<'free' | 'A' | 'B'>('free');
-  const [mode, setMode] = useState<'rotate' | 'select'>('rotate');
   const [features, setFeatures] = useState<RegionFeature[] | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [regionView, setRegionView] = useState(false);
@@ -48,10 +47,14 @@ export function GeographyScene({ active }: SceneProps) {
   const palmHold = useRef<{ since: number; x: number; y: number } | null>(null);
   // 捏合结束（选中/微调完成）后的撤手静默期：撤手动作不应被误判为挥手。
   const swipeGraceUntil = useRef(0);
+  // 统一交互：捏合拖动=旋转、捏合点击=选中；选点用“捏合前的指向位置”——
+  // 捏合闭合瞬间食指指尖会向拇指偏移，用闭合后的位置会选偏邻国或海洋。
+  const lastAim = useRef({ x: 0.5, y: 0.5 });
+  const pinchAnchor = useRef<{ x: number; y: number } | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const world = useRef<World | null>(null);
-  const live = useRef({ mode, selected, features, graticule });
-  live.current = { mode, selected, features, graticule };
+  const live = useRef({ selected, features, graticule });
+  live.current = { selected, features, graticule };
   const clue = CLUES[clueIndex];
 
   const emit = (intent: Parameters<typeof bus.emit>[0]['intent'], value?: string, source: Parameters<typeof bus.emit>[0]['source'] = 'mouse') =>
@@ -198,14 +201,30 @@ export function GeographyScene({ active }: SceneProps) {
     w.camera.position.z = Math.max(1.45, Math.min(6, w.camera.position.z + delta));
   };
 
-  // 手势策略：挥手旋转（带惯性）/ 张掌悬停刹车 / 双手张合缩放 / 捏合拖动 / 捏合点击选区。
+  // 手势策略（统一交互，无模式切换）：挥动=惯性旋转；捏合拖动=直接旋转；捏合点击=选中；张掌悬停=刹车；双手张合=缩放。
   useScenePolicy('geography', sample => {
-    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; return; }
-    // 捏合开始即冻结惯性：捏合意味着精确定位（选择/微调），
-    // 残余的滑行速度若不清零，松手后地球会继续转，选中的国家“跑掉”。
-    if (sample.phase === 'start') { spinVel.current = 0; pitchVel.current = 0; }
-    if (sample.phase === 'end') { swipeGraceUntil.current = performance.now() + 1200; swipe.current.reset(); swipeV.current.reset(); }
-    // 双手张合 → 缩放：双手距离增大=放大（靠近），减小=缩小。
+    if (sample.phase === 'cancel') { drag.current = null; swipe.current.reset(); swipeV.current.reset(); twoHandsDist.current = null; palmHold.current = null; swipeGraceUntil.current = 0; pinchAnchor.current = null; return; }
+    // 捏合开始即冻结惯性：捏合意味着精确定位，残余滑行会让选中的国家“跑掉”。
+    if (sample.phase === 'start') {
+      spinVel.current = 0; pitchVel.current = 0;
+      pinchAnchor.current = { x: sample.x, y: sample.y };
+      drag.current = { scene: 'geography', x: sample.x, y: sample.y };
+      return;
+    }
+    if (sample.phase === 'end') {
+      swipeGraceUntil.current = performance.now() + 1200;
+      swipe.current.reset(); swipeV.current.reset();
+      // 点击判定：捏合期间几乎没移动 → 选中国家；选点用捏合前的指向位置。
+      if (drag.current?.scene === 'geography' && pinchAnchor.current) {
+        const moved = Math.hypot(sample.x - pinchAnchor.current.x, sample.y - pinchAnchor.current.y);
+        if (moved < 0.05) selectAt(lastAim.current.x, lastAim.current.y);
+      }
+      drag.current = null; pinchAnchor.current = null;
+      return;
+    }
+    // 捏合前的移动持续更新“瞄准点”（闭合后的位置不用，见 lastAim 注释）。
+    if (!sample.pinching) lastAim.current = { x: sample.x, y: sample.y };
+    // 双手张合 → 缩放。
     if (sample.hands && sample.hands.length >= 2) {
       const d = Math.hypot(sample.hands[0].x - sample.hands[1].x, sample.hands[0].y - sample.hands[1].y);
       if (twoHandsDist.current != null) {
@@ -214,13 +233,13 @@ export function GeographyScene({ active }: SceneProps) {
       }
       twoHandsDist.current = d;
     } else twoHandsDist.current = null;
-    // 张开手掌且悬停不动 0.3 秒 → 刹车（挥动中的张开手掌不触发，避免与挥手冲突）。
+    // 张开手掌悬停 0.3 秒 → 刹车。
     if (sample.openPalm) {
       palmHold.current ??= { since: performance.now(), x: sample.x, y: sample.y };
       const h = palmHold.current;
       if (Math.hypot(sample.x - h.x, sample.y - h.y) < 0.045 && performance.now() - h.since > 300) brake.current = true;
     } else palmHold.current = null;
-    // 单手挥动 → 角速度冲量（不捏合时）；挥手方向=地球表面移动方向。
+    // 挥手 → 角速度冲量（水平=自转，竖直=俯仰）。
     if (!sample.pinching && performance.now() >= swipeGraceUntil.current) {
       const dir = swipe.current.push(sample.x, sample.y, performance.now(), { pinching: false });
       if (dir) {
@@ -232,22 +251,11 @@ export function GeographyScene({ active }: SceneProps) {
         pitchVel.current = Math.max(-1.2, Math.min(1.2, pitchVel.current + (vdir === 'down' ? 0.6 : -0.6)));
         notify(vdir === 'down' ? '已识别向下挥手 · 视角转向北半球' : '已识别向上挥手 · 视角转向南半球');
       }
-    } else { swipe.current.reset(); swipeV.current.reset(); }  // 捏合中/静默期：清空轨迹，撤手不误判
-    if (live.current.mode === 'rotate') {
-      if (sample.phase === 'start') { drag.current = { scene: 'geography', x: sample.x, y: sample.y }; return; }
-      if (drag.current?.scene === 'geography' && sample.pinching) {
-        applyRotate(sample.x - drag.current.x, sample.y - drag.current.y);
-        drag.current.x = sample.x; drag.current.y = sample.y;
-        return;
-      }
-      if (drag.current?.scene === 'geography' && sample.phase === 'end') drag.current = null;
-      return;
-    }
-    if (live.current.mode === 'select' && sample.phase === 'start') { drag.current = { scene: 'geography', x: sample.x, y: sample.y }; return; }
-    if (live.current.mode === 'select' && sample.phase === 'end' && drag.current?.scene === 'geography') {
-      const moved = Math.hypot(sample.x - drag.current.x, sample.y - drag.current.y);
-      if (moved < 0.03) selectAt(drag.current.x, drag.current.y);
-      drag.current = null;
+    } else { swipe.current.reset(); swipeV.current.reset(); }  // 捏合中/静默期：清空轨迹
+    // 捏合拖动 → 直接旋转（增量应用）。
+    if (drag.current?.scene === 'geography' && sample.pinching) {
+      applyRotate(sample.x - drag.current.x, sample.y - drag.current.y);
+      drag.current.x = sample.x; drag.current.y = sample.y;
     }
   });
 
@@ -264,7 +272,7 @@ export function GeographyScene({ active }: SceneProps) {
     if (e.intent === 'hint') setHint(v => Math.min(2, v + 1));
     if (e.intent === 'reset') {
       // 任务切换按钮会先 setTask 再 emit reset：这里不重置 task，只清作答状态。
-      setMode('rotate'); setSelected(null); setRegionView(false); setAnswerState('none'); setAnswerRegion('');
+      setSelected(null); setRegionView(false); setAnswerState('none'); setAnswerRegion('');
       setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setChat([]); setChatView(false); setInput(''); setStreaming(false);
     }
     if (e.intent === 'predict') {
@@ -295,7 +303,7 @@ export function GeographyScene({ active }: SceneProps) {
 
   useSceneSnapshot('geography', () => ({
     startedAt: new Date(started).toISOString(), durationSeconds: Math.round((Date.now() - started) / 1000),
-    task, mode, hints: hint, explanation, completed,
+    task, hints: hint, explanation, completed,
     selected: selected ? { region: selected.zh, lat: Number(selected.lat.toFixed(2)), lon: Number(selected.lon.toFixed(2)) } : null,
     quiz: task === 'A' ? { target: clue.target, result: answerState } : null,
     aiTurns: chat.filter(m => m.role === 'user').length,
@@ -334,18 +342,14 @@ export function GeographyScene({ active }: SceneProps) {
       <button className={task === 'A' ? 'selected' : ''} onClick={() => { setTask('A'); emit('reset'); }}>任务 A · 线索定位</button>
       <button className={task === 'B' ? 'selected' : ''} onClick={() => { setTask('B'); emit('reset'); }}>任务 B · 区位分析</button>
     </div>
-    <div className="task-card">{task === 'free' ? '拖动旋转地球，切到“选择”后点选区域，进入查看区位/地形/人文资料（可配 DeepSeek 生成讲解）。'
+    <div className="task-card">{task === 'free' ? '挥动旋转地球，指向国家捏合一下即可选中，进入详情查看资料与 AI 讲解。'
       : task === 'A' ? `根据线索在地球上选中目标国家，然后点“确认作答”：${clue.clue}`
       : '选择任意区域进入详情，观察区位、地形与人文的关系，回答下方问题并提交。'}</div>
     <div className="toolbar" style={{ marginTop: 12 }}>
-      <span aria-label="操作模式" role="group" className="tool-toggle">
-        <button aria-pressed={mode === 'rotate'} className={mode === 'rotate' ? 'selected' : ''} onClick={() => setMode('rotate')}>旋转</button>
-        <button aria-pressed={mode === 'select'} className={mode === 'select' ? 'selected' : ''} onClick={() => setMode('select')}>选择</button>
-      </span>
       <button onClick={() => zoom(-0.35)}>放大 +</button>
       <button onClick={() => zoom(0.35)}>缩小 −</button>
       <label className="small"><input type="checkbox" checked={graticule} onChange={e => setGraticule(e.target.checked)} /> 经纬网</label>
-      <span className="help">{mode === 'rotate' ? '左右挥动=地球自转，上下挥动=俯仰视角（下挥看北半球、上挥看南半球），有惯性；张开手掌悬停≈刹车；双手张合缩放；捏合拖动微调（滚轮缩放）' : '指向区域后捏合“点击”即可选中（鼠标单击）；挥手旋转与双手缩放同样可用'}</span>
+      <span className="help">挥手=旋转（左右自转、上下俯仰，有惯性）；指向国家捏合一下=选中；捏合拖动=微调旋转；张开手掌悬停≈刹车；双手张合缩放（鼠标：拖动/单击/滚轮）</span>
     </div>
     <div className="geo-host" ref={host}
       onPointerDown={e => {
@@ -357,14 +361,14 @@ export function GeographyScene({ active }: SceneProps) {
         const s = pointerState.current; if (!s.down) return;
         const p = canvasPos(e);
         s.moved = Math.max(s.moved, Math.hypot(p.x - s.x, p.y - s.y));
-        if (mode === 'rotate') applyRotate(p.x - s.x, p.y - s.y);
+        applyRotate(p.x - s.x, p.y - s.y);
         s.x = p.x; s.y = p.y;
       }}
       onPointerUp={e => {
         const s = pointerState.current;
         if (!s.down) return; // 浮层按钮点击冒泡的 pointerup，与画布操作无关
         s.down = false;
-        if (mode === 'select' && s.moved < 0.02) { const p = canvasPos(e); selectAt(p.x, p.y); }
+        if (s.moved < 0.02) { const p = canvasPos(e); selectAt(p.x, p.y); }
       }}
       onWheel={e => {
         if ((e.target as HTMLElement).closest('.globe-overlay')) return; // 浮层滚动（如聊天列表）不缩放地球
@@ -409,18 +413,18 @@ export function GeographyScene({ active }: SceneProps) {
         <h3>① {task === 'A' ? '线索作答' : task === 'B' ? '区位分析' : '当前选择'}</h3>
         {task === 'A' ? <>
           <p className="help">{clue.clue}</p>
-          <p>当前选中：{selected?.zh ?? '（在选择模式下点选国家）'}</p>
+          <p>当前选中：{selected?.zh ?? '（指向国家捏合一下即可选中）'}</p>
           <button className="primary" disabled={!selected || answerState !== 'none'} onClick={() => emit('predict', selected?.zh)}>确认作答</button>
           {answerState !== 'none' && <p className={answerState === 'right' ? 'notice' : 'notice'}>{answerState === 'right' ? '✓ 回答正确！' : `✗ 选中的是${answerRegion}，正确答案线索再读一遍。`}</p>}
           <button onClick={() => { setClueIndex((clueIndex + 1) % CLUES.length); setAnswerState('none'); setAnswerRegion(''); setSelected(null); setHint(0); notify('已切换到新线索。'); }}>换一题</button>
         </> : task === 'B' ? <p>选择一个区域进入详情（或直接作答）：观察区位、地形与人文特征之间的关系，例如“地形如何影响人口分布”。</p>
-        : <p>{selected ? `已选中 ${selected.zh}（${selected.lat.toFixed(1)}°, ${selected.lon.toFixed(1)}°）` : '未选择区域。切到“选择”模式后点选地球上的国家。'}</p>}
+        : <p>{selected ? `已选中 ${selected.zh}（${selected.lat.toFixed(1)}°, ${selected.lon.toFixed(1)}°）` : '未选择区域。指向地球上的国家捏合一下即可选中（鼠标单击）。'}</p>}
         {selected && <button onClick={() => setRegionView(true)}>进入区域详情</button>}
       </div>
       <div className="panel result">
         <h3>② 实时观察</h3>
         <div className="big-number">{selected ? selected.lat.toFixed(0) : '—'}<small>° 纬度</small></div>
-        <p>{selected ? `经度 ${selected.lon.toFixed(1)}° · ${selected.continent}` : '旋转地球，选择模式下点选区域可读出经纬度。'}</p>
+        <p>{selected ? `经度 ${selected.lon.toFixed(1)}° · ${selected.continent}` : '旋转地球，点选区域可读出经纬度。'}</p>
         <p className="help">区域判定：Natural Earth 离线边界 + 点在多边形确定性计算（国家级精度）；不依赖任何在线地图服务。</p>
       </div>
       <div className="panel hint">

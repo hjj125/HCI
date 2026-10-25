@@ -30,7 +30,6 @@ describe('地理 · 数字地球场景', () => {
     navGeo();
     expect(screen.getByText('世界地理探究')).toBeTruthy();
     expect(screen.getByRole('button', { name: '任务 A · 线索定位' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '选择' })).toBeTruthy();
     expect(screen.getByLabelText(/经纬网/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '演示模式' })).toBeTruthy();
   });
