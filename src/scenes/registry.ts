@@ -5,6 +5,7 @@ import { GeometryScene } from './geometry/GeometryScene';
 import { FunctionsScene } from './functions/FunctionsScene';
 import { AngleScene } from './bodyangle/AngleScene';
 import { PhysicsScene } from './physics/PhysicsScene';
+import { MoleculeScene } from './molecule/MoleculeScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
 import { SeasonsScene } from './geography/SeasonsScene';
@@ -34,6 +35,12 @@ export const subjects: SubjectGroup[] = [
     id: 'physics', title: '物理',
     experiments: [
       { id: 'physics', title: '力与运动', icon: '⬡', description: '力矢量拖动与牛顿仿真（演示 + 任务 A/B/C）', component: PhysicsScene },
+    ],
+  },
+  {
+    id: 'chemistry', title: '化学',
+    experiments: [
+      { id: 'chem-molecule', title: '分子搭建', icon: '⚛', description: '点选原子成键，搭出分子模型与同分异构体（演示 + 任务 A/B/C）', component: MoleculeScene },
     ],
   },
   {
