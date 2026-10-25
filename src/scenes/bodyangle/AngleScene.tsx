@@ -19,7 +19,7 @@ const CLASSES = ['锐角', '直角', '钝角', '平角'] as const;
 type AngleClass = (typeof CLASSES)[number];
 
 /** 测量视图：手部骨架叠加 + 顶点角度弧线 + 大号度数。 */
-function MeasureView({ landmarks, deg, mode, locked }: { landmarks: Pt[][] | null; deg: number | null; mode: Mode; locked: boolean }) {
+function MeasureView({ landmarks, deg, mode, locked, handHint }: { landmarks: Pt[][] | null; deg: number | null; mode: Mode; locked: boolean; handHint: string | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current; if (!c) return;
@@ -65,9 +65,12 @@ function MeasureView({ landmarks, deg, mode, locked }: { landmarks: Pt[][] | nul
     if (!landmarks) {
       ctx.fillStyle = '#7a8aa8'; ctx.font = '15px Inter, "Microsoft YaHei", sans-serif';
       ctx.fillText('启用摄像头后：双手各伸出一根食指拼一个角（或切换为单手虎口角）', W / 2, H / 2 + 60);
+    } else if (handHint) {
+      ctx.fillStyle = '#ffd76a'; ctx.font = '15px Inter, "Microsoft YaHei", sans-serif';
+      ctx.fillText(handHint, W / 2, H / 2 + 60);
     }
     ctx.textAlign = 'left';
-  }, [landmarks, deg, mode, locked]);
+  }, [landmarks, deg, mode, locked, handHint]);
   return <canvas ref={ref} width={1200} height={460} aria-label="角度测量视图" className="fn-host-canvas" />;
 }
 
@@ -113,6 +116,13 @@ export function AngleScene({ active }: SceneProps) {
   const [task, setTask] = useState<Task>('free');
   const [mode, setMode] = useState<Mode>('two');
   const [reading, setReading] = useState<{ landmarks: Pt[][] | null; deg: number | null }>({ landmarks: null, deg: null });
+  const handHint = (() => {
+    const lms = reading.landmarks;
+    if (mode === 'two' && lms && lms.length === 1 && reading.deg == null) return '已检测到 1 只手——双手角需要双手同时入镜，或切换「虎口角」单手测量。';
+    if (mode === 'thumb' && lms && lms.length === 0) return null;
+    if (mode === 'thumb' && lms && lms.length >= 2 && reading.deg == null) return '虎口角只需一只手（可先移开另一只）。';
+    return null;
+  })();
   const [lockedDeg, setLockedDeg] = useState<number | null>(null);
   const [aIndex, setAIndex] = useState(0);
   const [predClass, setPredClass] = useState<'' | AngleClass>('');
@@ -252,7 +262,7 @@ export function AngleScene({ active }: SceneProps) {
       <span className="help">骨架为手部关键点示意（摄像头画面见右下角）；锁定用最近读数的中位数，抗手抖</span>
     </div>
     <div className="fn-host" onClick={() => { /* 画布点击由按钮与捏合承担，避免误触锁定 */ }}>
-      <MeasureView landmarks={reading.landmarks} deg={deg} mode={mode} locked={lockedDeg != null} />
+      <MeasureView landmarks={reading.landmarks} deg={deg} mode={mode} locked={lockedDeg != null} handHint={handHint} />
     </div>
     <aside className="side" style={{ marginTop: 16 }}>
       <div className="panel prediction">
