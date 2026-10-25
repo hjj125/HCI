@@ -164,12 +164,15 @@ export function GeographyScene({ active }: SceneProps) {
     }
   });
 
-  /** 首都标记：内置表/缓存立即可用；未命中时询问 DeepSeek（弹窗提示）并缓存。 */
+  /** 首都标记：内置表/缓存立即可用；未命中时询问 DeepSeek（弹窗提示）并缓存。
+   *  过期判定用同步请求令牌而非 React 状态——内置表命中时 resolveCapital 在
+   *  setSelected 提交前就返回，读 React 状态会误判“用户已切走”而丢弃首都标记。 */
+  const capitalReq = useRef<string | null>(null);
   const placeCapitalMarker = async (zh: string, name: string, continent: string) => {
+    capitalReq.current = name;
     const r = await resolveCapital(zh, name, () => setAsking(zh));
     setAsking(null);
-    if (!r) return;
-    if (live.current.selected?.name !== name) return; // 用户已切到别处
+    if (!r || capitalReq.current !== name) return; // 已被更新的定位请求取代
     setGlobeMarker({ name, lat: r.capital.lat, lon: r.capital.lon });
     setCapitalInfo({ name, zh: r.capital.zh, lat: r.capital.lat, lon: r.capital.lon, continent, source: r.source });
   };
@@ -190,7 +193,7 @@ export function GeographyScene({ active }: SceneProps) {
     if (e.intent === 'reset') {
       // 任务切换按钮会先 setTask 再 emit reset：这里不重置 task，只清作答状态。
       setSelected(null); setRegionView(false); setAnswerState('none'); setAnswerRegion(''); setGlobeMarker(null); setCapitalInfo(null);
-      setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setChat([]); setChatView(false); setInput(''); setStreaming(false);
+      setExplanation(''); setCompleted(false); setHint(0); setStarted(Date.now()); setChat([]); setChatView(false); setInput(''); setStreaming(false); capitalReq.current = null;
     }
     if (e.intent === 'predict') {
       const ok = selected?.name === clue.target;
