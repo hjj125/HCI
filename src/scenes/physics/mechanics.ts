@@ -32,3 +32,27 @@ export const heading = (b: Body) => (Math.atan2(b.vy, b.vx) * 180) / Math.PI;
 export const inTarget = (b: Body, t: { x: number; y: number; r: number }) => Math.hypot(b.x - t.x, b.y - t.y) <= t.r;
 export const clampForce = (magnitude: number, angle: number): Force =>
   ({ magnitude: Math.max(0, Math.min(MAX_FORCE, magnitude)), angle: (angle % 360 + 360) % 360 });
+
+/** ===== 挑战模式 · 星际巡游 ===== */
+export const GAME_START: [number, number] = [2.5, 2.5];
+export const GAME_GOAL = { x: 17, y: 9, r: 1.2 };
+export const COLLECT_R = 0.9;
+
+/** 生成随机途经点（拒绝采样）：在观测区内、远离起点与终点、彼此保持间距。
+ *  rng 可注入（确定性测试）；采样失败时沿起终点对角线兜底铺开。 */
+export function makeWaypoints(count: number, rng: () => number = Math.random): [number, number][] {
+  const dist = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const out: [number, number][] = [];
+  let guard = 0;
+  while (out.length < count && guard++ < 600) {
+    const p: [number, number] = [4.5 + rng() * 11, 2 + rng() * 7];
+    if (dist(p, GAME_START) < 4.5 || dist(p, [GAME_GOAL.x, GAME_GOAL.y]) < 3) continue;
+    if (out.some(q => dist(p, q) < 3)) continue;
+    out.push(p);
+  }
+  while (out.length < count) {
+    const t = (out.length + 1) / (count + 1);
+    out.push([GAME_START[0] + (GAME_GOAL.x - GAME_START[0]) * t, GAME_START[1] + (GAME_GOAL.y - GAME_START[1]) * t]);
+  }
+  return out;
+}

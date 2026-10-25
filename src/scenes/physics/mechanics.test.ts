@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { simulate, step, speed, inTarget, clampForce } from './mechanics';
+import { simulate, step, speed, inTarget, clampForce, makeWaypoints, GAME_START, GAME_GOAL } from './mechanics';
 
 describe('力与运动仿真（物理正确性）', () => {
   it('无力时保持匀速直线运动（牛顿第一定律）', () => {
@@ -37,5 +37,31 @@ describe('力与运动仿真（物理正确性）', () => {
     expect(inTarget({ x: 3, y: 4, vx: 0, vy: 0 }, { x: 3, y: 4, r: 1 })).toBe(true);
     expect(inTarget({ x: 5, y: 4, vx: 0, vy: 0 }, { x: 3, y: 4, r: 1 })).toBe(false);
     expect(clampForce(99, -90)).toEqual({ magnitude: 4, angle: 270 });
+  });
+});
+
+describe('挑战模式课程点生成', () => {
+  it('同一种子确定性复现', () => {
+    const a = makeWaypoints(3, () => 0.42);
+    const b = makeWaypoints(3, () => 0.42);
+    expect(a).toEqual(b);
+  });
+  it('途经点在观测区内且满足间距约束（60 次随机抽样）', () => {
+    const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    for (let i = 0; i < 60; i++) {
+      const wps = makeWaypoints(3);
+      expect(wps).toHaveLength(3);
+      for (const [x, y] of wps) {
+        expect(x).toBeGreaterThan(4); expect(x).toBeLessThan(16);
+        expect(y).toBeGreaterThan(1.5); expect(y).toBeLessThan(9.5);
+        expect(dist([x, y], GAME_START)).toBeGreaterThanOrEqual(4.4);
+        expect(dist([x, y], [GAME_GOAL.x, GAME_GOAL.y])).toBeGreaterThanOrEqual(2.9);
+      }
+      expect(dist(wps[0], wps[1])).toBeGreaterThanOrEqual(2.9);
+      expect(dist(wps[1], wps[2])).toBeGreaterThanOrEqual(2.9);
+    }
+  });
+  it('拒绝采样失败时沿对角线兜底，数量仍满足', () => {
+    expect(makeWaypoints(3, () => 0)).toHaveLength(3);
   });
 });

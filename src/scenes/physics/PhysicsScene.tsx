@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSnapshot, useServices } from '../../core/services';
-import { step, speed, inTarget, clampForce, MAX_FORCE, type Body, type Force, type Vec2 } from './mechanics';
+import { step, speed, inTarget, clampForce, makeWaypoints, GAME_START, GAME_GOAL, COLLECT_R, MAX_FORCE, type Body, type Force, type Vec2 } from './mechanics';
 
 const HINTS = [
   '先观察，再按需请求提示。',
@@ -25,7 +25,7 @@ type Snap = { label: string; trail: Vec2[]; finalSpeed: number; displacement: nu
 /** 物理场景插件：力与运动——拖动力矢量改变大小/方向，确定性牛顿仿真验证预测。 */
 export function PhysicsScene({ active }: SceneProps) {
   const { notify, drag } = useServices();
-  const [task, setTask] = useState<'free' | 'A' | 'B' | 'C'>('free');
+  const [task, setTask] = useState<'free' | 'A' | 'B' | 'C' | 'game'>('free');
   const [body, setBody] = useState<Body>(INITIAL);
   const [force, setForce] = useState<Force>(DEFAULT_FORCE);
   const [running, setRunning] = useState(false);
@@ -38,13 +38,24 @@ export function PhysicsScene({ active }: SceneProps) {
   const [hint, setHint] = useState(0);
   const [history, setHistory] = useState<Force[]>([]);
   const [snaps, setSnaps] = useState<Snap[]>([]);
+  // 挑战模式 · 星际巡游：按顺序收集途经点后进入终点；计时从首次运行累计。
+  const [waypoints, setWaypoints] = useState<[number, number][]>(() => makeWaypoints(3));
+  const [collected, setCollected] = useState(0);
+  const [attempts, setAttempts] = useState(0);
+  const [gameStats, setGameStats] = useState<{ seconds: number; thrusts: number; attempts: number } | null>(null);
+  const collectedRef = useRef(0);
+  const attemptsRef = useRef(0);
+  const thrustsRef = useRef(0);
   const [started, setStarted] = useState(Date.now());
   const [stalled, setStalled] = useState(false);
   const lastActivity = useRef(Date.now());
   const canvas = useRef<HTMLCanvasElement>(null);
   const runSeconds = useRef(0);
-  const live = useRef({ body, force, task });
-  live.current = { body, force, task };
+  const live = useRef({ body, force, task, waypoints: waypoints as [number, number][] });
+  live.current = { body, force, task, waypoints };
+  // 游戏进度以 ref 为准（仿真循环内同步读写，绕开 React 批处理时序）。
+  const gameRef = useRef({ waypoints, collected: 0 });
+  gameRef.current = { waypoints, collected: collectedRef.current };
 
   const emit = (intent: Parameters<typeof bus.emit>[0]['intent'], value?: string, source: Parameters<typeof bus.emit>[0]['source'] = 'mouse') =>
     bus.emit({ scene: 'physics', source, intent, phase: 'end', value });
@@ -68,6 +79,36 @@ export function PhysicsScene({ active }: SceneProps) {
         const s = live.current;
         const next = step(s.body, s.task === 'A' ? { magnitude: 0, angle: s.force.angle } : s.force, 1 / 60);
         runSeconds.current += 1 / 60;
+        if (s.task === 'game') {
+          // 顺序收集途经点 → 终点；出界送回起点（计时继续，天然惩罚）。
+          const g = gameRef.current;
+          if (g.collected < g.waypoints.length) {
+            const wp = g.waypoints[g.collected];
+            if (Math.hypot(next.x - wp[0], next.y - wp[1]) < COLLECT_R) {
+              collectedRef.current += 1; gameRef.current.collected = collectedRef.current;
+              setCollected(collectedRef.current);
+              notify(collectedRef.current === g.waypoints.length
+                ? '全部途经点已收集 ✓ 前往终点传送门！'
+                : '途经点 ' + collectedRef.current + ' ✓ 已收集');
+            }
+          } else if (inTarget(next, GAME_GOAL)) {
+            setRunning(false); setCompleted(true);
+            const stats = { seconds: runSeconds.current, thrusts: thrustsRef.current, attempts: attemptsRef.current };
+            setGameStats(stats);
+            notify('🏁 挑战成功！用时 ' + stats.seconds.toFixed(1) + ' 秒，施力 ' + stats.thrusts + ' 次，出界 ' + stats.attempts + ' 次');
+            return;
+          }
+          if (next.x < -0.8 || next.x > 20.8 || next.y < -0.8 || next.y > 10.8) {
+            attemptsRef.current += 1; setAttempts(attemptsRef.current);
+            setBody({ x: GAME_START[0], y: GAME_START[1], vx: 0, vy: 0 });
+            setTrail([[GAME_START[0], GAME_START[1]]]);
+            notify('漂出观测区（第 ' + attemptsRef.current + ' 次），已送回起点——计时继续');
+            return;
+          }
+          setBody(next);
+          setTrail(t => (t.length > 4000 ? t : [...t, [next.x, next.y]]));
+          return;
+        }
         setBody(next);
         setTrail(t => (t.length > 4000 ? t : [...t, [next.x, next.y]]));
         const out = next.x < -0.8 || next.x > 20.8 || next.y < -0.8 || next.y > 10.8; // 出可见观测区即停
@@ -150,6 +191,7 @@ export function PhysicsScene({ active }: SceneProps) {
       if (e.phase === 'update' && drag.current?.scene === 'physics' && e.position)
         setForce(pointerToForce(e.position.x, e.position.y));
       if (e.phase === 'end' && drag.current?.scene === 'physics') {
+        if (task === 'game') thrustsRef.current += 1; // 一次拖拽释放 = 一次施力
         const before = drag.current.initial;
         if (before) setHistory(v => [...v, { magnitude: before.magnitude, angle: before.angle }].slice(-30));
         drag.current = null;
@@ -159,12 +201,19 @@ export function PhysicsScene({ active }: SceneProps) {
     if (e.scene !== 'physics') return;
     if (e.intent === 'run') {
       if (task === 'A' && !submitted) { notify('任务 A：先提交预测，再运行验证。'); return; }
-      const start = task === 'B' ? REST : INITIAL;
+      if (task === 'game' && gameStats) { notify('本局已结束，点“再来一局”开新挑战。'); return; }
+      const start = task === 'game' ? { x: GAME_START[0], y: GAME_START[1], vx: 0, vy: 0 } : task === 'B' ? REST : INITIAL;
       runSeconds.current = 0; setBody(start); setTrail([[start.x, start.y]]); setObserved(null); setCompleted(false); setRunning(true);
     }
     if (e.intent === 'pause') setRunning(false);
     if (e.intent === 'reset') {
       resetRun(false); setPrediction(''); setSubmitted(false); setExplanation(''); setHint(0); setSnaps([]); setHistory([]); setStarted(Date.now()); setStalled(false);
+      if (task === 'game') {
+        collectedRef.current = 0; attemptsRef.current = 0; thrustsRef.current = 0;
+        setCollected(0); setAttempts(0); setGameStats(null); setWaypoints(makeWaypoints(3));
+        const s0 = { x: GAME_START[0], y: GAME_START[1], vx: 0, vy: 0 };
+        setBody(s0); setTrail([[s0.x, s0.y]]);
+      }
     }
     if (e.intent === 'undo') {
       if (drag.current?.scene === 'physics' && drag.current.initial) { setForce({ magnitude: drag.current.initial.magnitude, angle: drag.current.initial.angle }); drag.current = null; }
@@ -233,6 +282,33 @@ export function PhysicsScene({ active }: SceneProps) {
     if (task !== 'A' || force.magnitude > 0) arrow({ x: bx, y: by }, force.angle, 1.2 + force.magnitude * scale * 0.45, '#ff5a5a', `F=${force.magnitude.toFixed(1)}N`);
     const v = speed(body);
     if (v > 0.01) arrow({ x: bx, y: by }, Math.atan2(body.vy, body.vx) * 180 / Math.PI, 1.2 + v * scale * 0.32, '#6ee7a0', `v=${v.toFixed(1)}`);
+    if (task === 'game') {
+      // 起点停机坪（绿色）
+      ctx.strokeStyle = '#6ee7a0'; ctx.lineWidth = 2; ctx.setLineDash([7, 6]);
+      ctx.beginPath(); ctx.arc(W(GAME_START[0]), H(GAME_START[1]), 0.7 * scale, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = '#6ee7a0'; ctx.font = '12px sans-serif';
+      ctx.fillText('起点', W(GAME_START[0]) - 14, H(GAME_START[1]) + 0.9 * scale + 14);
+      // 终点传送门（琥珀，脉冲）
+      const pulse = 1 + 0.08 * Math.sin(performance.now() / 300);
+      ctx.strokeStyle = '#f4c784'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(W(GAME_GOAL.x), H(GAME_GOAL.y), GAME_GOAL.r * scale * pulse, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.25; ctx.fillStyle = '#f4c784';
+      ctx.beginPath(); ctx.arc(W(GAME_GOAL.x), H(GAME_GOAL.y), GAME_GOAL.r * scale * 0.8, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = '#f4c784'; ctx.fillText('终点', W(GAME_GOAL.x) - 14, H(GAME_GOAL.y) - GAME_GOAL.r * scale - 8);
+      // 途经信标（青色，未收集脉冲；已收集打勾变暗）
+      waypoints.forEach((w, i) => {
+        const done = i < collected;
+        const r = 0.55 * scale * (done ? 1 : 1 + 0.1 * Math.sin(performance.now() / 250 + i));
+        ctx.strokeStyle = done ? '#3a5a52' : '#5de0c6'; ctx.lineWidth = done ? 1.5 : 2.5;
+        ctx.beginPath(); ctx.arc(W(w[0]), H(w[1]), r, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = done ? '#3a5a52' : '#5de0c6'; ctx.font = 'bold 14px sans-serif';
+        ctx.fillText(done ? '✓' : ['①', '②', '③'][i], W(w[0]) - (done ? 6 : 7), H(w[1]) + 5);
+      });
+      if (gameStats) {
+        ctx.fillStyle = '#f4c784'; ctx.font = 'bold 34px sans-serif';
+        ctx.fillText('🏁 挑战成功！', c.width / 2 - 110, c.height / 2 - 60);
+      }
+    }
     ctx.fillStyle = '#e5edf7'; ctx.beginPath(); ctx.arc(bx, by, 8, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#7ae8d4'; ctx.lineWidth = 2; ctx.stroke();
   }, [active, body, force, trail, task]);
@@ -255,10 +331,12 @@ export function PhysicsScene({ active }: SceneProps) {
       <button className={task === 'A' ? 'selected' : ''} onClick={() => { setTask('A'); emit('reset'); }}>任务 A · 预测验证</button>
       <button className={task === 'B' ? 'selected' : ''} onClick={() => { setTask('B'); emit('reset'); }}>任务 B · 抵达目标</button>
       <button className={task === 'C' ? 'selected' : ''} onClick={() => { setTask('C'); emit('reset'); }}>任务 C · 轨迹对比</button>
+      <button className={task === 'game' ? 'selected' : ''} onClick={() => { setTask('game'); setTimeout(() => emit('reset'), 0); }}>挑战 · 星际巡游</button>
     </div>
     <div className="task-card">{task === 'free' ? '教师演示：拖动红色力矢量改变大小与方向，点击开始观察速度（绿）如何响应；不施力时保持匀速直行。'
       : task === 'A' ? '探测器正以 1.5 m/s 向右匀速航行，本任务中力恒为零。预测：5 秒后它会怎样？提交后运行验证。'
       : task === 'B' ? `探测器从静止出发（初速 0）。目标：调整力矢量，让它在 ${TASK_B_SECONDS} 秒内进入琥珀色目标区（半径 1 m）。`
+      : task === 'game' ? '按 ①→②→③ 顺序收集全部信标，最后进入终点传送门。计时从首次“开始”累计，出界送回起点但计时不停。'
       : '用不同施力方案各跑一次，保存两条轨迹并排比较，解释力如何造成差异。'}</div>
     <div className="slide-controls" style={{ marginTop: 14 }}>
       <button className="primary" style={{ width: 'auto' }} disabled={lockedA} onClick={() => emit(running ? 'pause' : 'run')}>{running ? '暂停' : '开始'}</button>
@@ -284,12 +362,21 @@ export function PhysicsScene({ active }: SceneProps) {
     <p className="help">{task === 'A' ? '任务 A 中力恒为零：这正是验证“没有力会怎样”的实验条件。' : '鼠标或手势捏合红色箭头头部拖动即可改变力（大小=离物体的距离，方向=指向）；绿色箭头是当前速度。'}</p>
     <aside className="side" style={{ marginTop: 16 }}>
       <div className="panel prediction">
-        <h3>① {task === 'A' ? '提交预测' : task === 'B' ? '目标任务' : task === 'C' ? '轨迹快照' : '演示要点'}</h3>
+        <h3>① {task === 'A' ? '提交预测' : task === 'B' ? '目标任务' : task === 'C' ? '轨迹快照' : task === 'game' ? '星际巡游' : '演示要点'}</h3>
         {task === 'A' ? <>
           <div className="chips">{PREDICTIONS.map(p => <button key={p.id} disabled={submitted} className={prediction === p.id ? 'selected' : ''} onClick={() => setPrediction(p.id)}>{p.text}</button>)}</div>
           <button className="primary" disabled={!prediction || submitted} onClick={() => emit('predict', PREDICTIONS.find(p => p.id === prediction)?.text)}>{submitted ? '预测已记录' : '提交预测'}</button>
           {observed && <p className="notice">{observed}</p>}
         </> : task === 'B' ? <p>{completed ? '已抵达目标区！补充解释后提交。' : `目标在东北方向 ${(Math.hypot(TARGET.x - INITIAL.x, TARGET.y - INITIAL.y)).toFixed(1)} m 处。初速为 0：只靠力矢量到达。可以先朝目标施力，中途调整方向。`}</p>
+        : task === 'game' ? <>
+          <div className="chips">
+            {waypoints.map((w, i) => <button key={i} disabled className={i < collected ? 'selected' : ''}>{['①', '②', '③'][i]} 信标 {i < collected ? '✓' : ''}</button>)}
+          </div>
+          {gameStats
+            ? <div className="notice">🏁 成功！用时 {gameStats.seconds.toFixed(1)} 秒 · 施力 {gameStats.thrusts} 次 · 出界 {gameStats.attempts} 次<br /><button onClick={() => emit('reset')}>再来一局（新地图）</button></div>
+            : <p className="help">已收集 {collected}/{waypoints.length} · 出界 {attempts} 次。提示：先给一次大力朝向①，途中用小力修正；惯性会替你省力。</p>}
+          <button onClick={() => emit('reset')}>换一张星图</button>
+        </>
         : task === 'C' ? <>
           <div className="chips">{snaps.map((s, i) => <button key={i} className="selected">{i + 1} · {s.label}</button>)}</div>
           <button className="primary" disabled={trail.length < 6 || snaps.length >= 2 || running} onClick={saveSnap}>{snaps.length >= 2 ? '已保存 2 条轨迹' : `保存当前轨迹 ${snaps.length}/2`}</button>
@@ -304,7 +391,7 @@ export function PhysicsScene({ active }: SceneProps) {
       </div>
       <div className="panel result">
         <h3>② 实时观察</h3>
-        <div className="big-number">{speed(body).toFixed(1)}<small>m/s 当前速率</small></div>
+        <div className="big-number">{task === 'game' ? (gameStats ? gameStats.seconds.toFixed(1) : runSeconds.current.toFixed(1)) : speed(body).toFixed(1)}<small>{task === 'game' ? '秒 · 巡游计时' : 'm/s 当前速率'}</small></div>
         <p>力：{force.magnitude.toFixed(1)} N @ {Math.round(force.angle)}°（上限 {MAX_FORCE} N，质量 1 kg）</p>
         <p className="help">位置 x={body.x.toFixed(1)} m, y={body.y.toFixed(1)} m；运行时长 {runSeconds.current.toFixed(1)} s。仿真为确定性牛顿积分（半隐式欧拉），结果可复现。</p>
       </div>
