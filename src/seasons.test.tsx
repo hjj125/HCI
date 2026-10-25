@@ -79,16 +79,17 @@ describe('地理 · 五带与四季场景', () => {
     expect((screen.getByRole('button', { name: /提交观察解释/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('任务 C：剖面影子视图渲染，调到当地正午自动判定达成', () => {
+  it('任务 C：剖面影子视图渲染，面板内时刻滑杆调到当地正午自动判定达成', () => {
     render(<App />);
     navSeasons();
     fireEvent.click(screen.getByRole('button', { name: /任务 C/ }));
     expect(screen.getByLabelText('太阳视运动与影长剖面图')).toBeTruthy();
+    expect(screen.getByLabelText('影长视图时刻')).toBeTruthy();  // 面板内本地滑杆
     expect(screen.getByText(/当前当地太阳时/)).toBeTruthy();
     const submit = screen.getByRole('button', { name: /提交观察解释/ }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     // 默认城市北京（东经 116.4°）：UTC 4.25 ≈ 当地正午 12:01
-    fireEvent.change(screen.getByLabelText('一天时刻'), { target: { value: '4.25' } });
+    fireEvent.change(screen.getByLabelText('影长视图时刻'), { target: { value: '4.25' } });
     expect(screen.getByText(/✓ 正午达成！影长已是一天中最短/)).toBeTruthy();
     expect(screen.getByText(/影长\/杆高/)).toBeTruthy();
   });

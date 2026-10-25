@@ -356,6 +356,12 @@ export function SeasonsScene({ active }: SceneProps) {
         <h3>② {task === 'C' ? '太阳视运动与影长' : '实时观察'}</h3>
         {task === 'C' ? <>
           <ShadowProfile lat={cLoc.lat} lon={cLoc.lon} utc={utc} doy={doy} />
+          <div className="toolbar" style={{ margin: '10px 0 0' }}>
+            <span className="eyebrow" style={{ marginRight: 0 }}>一天时刻 UTC {fmt(utc)}</span>
+            <input aria-label="影长视图时刻" type="range" min={0} max={23.75} step={0.25} value={utc}
+              onChange={e => { setPlaying(false); setUtc(Number(e.target.value)); }} style={{ flex: 1, minWidth: 160 }} />
+            <span className="small">{cLoc.zh}当地 {fmt(cSolar)}</span>
+          </div>
           <div className="shadow-meta">
             <span>当地太阳时 <b>{fmt(cSolar)}</b></span>
             <span>太阳高度角 <b>{cAlt > 0 ? `${cAlt.toFixed(1)}°` : '地平线下'}</b></span>
