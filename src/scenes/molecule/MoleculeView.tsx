@@ -117,12 +117,12 @@ export const MoleculeView = forwardRef<MoleculeHandle, Props>(function MoleculeV
       }
       for (const [, p] of pos.current) { p.z *= st.dragging ? 1 : 0.9; }
       // 摆放原子球。
-      for (const m of world.current.atomGroup.children as THREE.Mesh[]) {
+      for (const m of atomGroup.children as THREE.Mesh[]) {
         const p = pos.current.get(m.userData.id as number);
         if (p) m.position.set(p.x, p.y, p.z);
       }
       // 摆放键圆柱（双键双圆柱，沿视线垂直方向偏移）。
-      for (const m of world.current.bondGroup.children as THREE.Mesh[]) {
+      for (const m of bondGroup.children as THREE.Mesh[]) {
         const { a, b, slot, count } = m.userData as { a: number; b: number; slot: number; count: number };
         const pa = pos.current.get(a), pb = pos.current.get(b);
         if (!pa || !pb) continue;
@@ -140,8 +140,8 @@ export const MoleculeView = forwardRef<MoleculeHandle, Props>(function MoleculeV
       }
       renderer.render(scene, camera);
     };
-    tick();
     world.current = { camera, atomGroup, bondGroup, renderer, observer };
+    tick();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); renderer.dispose(); renderer.domElement.remove(); world.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
