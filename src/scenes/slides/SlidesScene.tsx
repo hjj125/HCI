@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSettings, useServices } from '../../core/services';
-import { subjects } from '../registry';
 import { SwipeDetector } from './pptGesture';
 import { PowerPointPanel } from './PowerPointPanel';
 
@@ -95,16 +94,9 @@ export function SlidesScene({ active }: SceneProps) {
                 <div className="cover-glow g1" /><div className="cover-glow g2" />
                 <div className="cover-eyebrow">EMBODIEDEDU · 灵境智学 · 具身学习多模态交互平台</div>
                 <h1 className="cover-title">让知识，可以被操作</h1>
-                <p className="cover-sub">八大学科 · 十四个实验 —— 手势、语音、鼠标与键盘在同一个交互内核里，连接课堂讲解与动手探究。点击任意卡片直接进入：</p>
-                <div className="cover-grid">
-                  {subjects.flatMap(g => g.experiments.map(s => (
-                    <button key={s.id} aria-label={`进入${s.title}实验`} title={s.description} onClick={() => emit('switch', s.id)}>
-                      <span className="scene-icon">{s.icon}</span>
-                      <span>{s.title}<small>{g.title}</small></span>
-                    </button>
-                  )))}
-                </div>
-                <p className="help">手掌向左/向右挥动可翻页；以下翻页与工具在演示与授课中随时可用。</p>
+                <p className="cover-sub">通过身体动作、可见对象和即时反馈，连接课堂讲解与动手探究。</p>
+                <div className="cover-tags">数学 · 物理 · 化学 · 生物 · 美术 · 语文 · 地理 —— 八大学科 · 十四个动手实验</div>
+                <p className="help">本页为演示封面；导入图片课件可完全替换。手掌左右挥动即可翻页。</p>
               </div>
             : <><h1>{slideTitles[slide]}</h1><p>{slideTexts[slide]}</p></>}
         <div className="slide-controls">
