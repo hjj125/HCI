@@ -39,15 +39,17 @@ function ProfileEditor({ profile, onChange }: { profile: Profile; onChange: (p: 
     const ctx = c.getContext('2d'); if (!ctx) return;
     ctx.fillStyle = '#0c1727'; ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = '#182740'; ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+    // 轮盘基线
+    ctx.strokeStyle = '#26394f'; ctx.beginPath(); ctx.moveTo(20, H - 14); ctx.lineTo(W - 20, H - 14); ctx.stroke();
     const sorted = [...profile].sort((a, b) => a.y - b.y);
-    ctx.strokeStyle = '#38d8c1'; ctx.lineWidth = 3; ctx.beginPath();
+    // 陶坯侧影：填充陶土色，一眼读出"这是个器物"
+    ctx.fillStyle = '#c9a986'; ctx.beginPath();
     sorted.forEach((p, i) => { const q = ptXY(p); if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y); });
-    // 镜像另一半形成侧影
     for (let i = sorted.length - 1; i >= 0; i--) { const q = ptXY({ ...sorted[i], r: -sorted[i].r }); ctx.lineTo(q.x, q.y); }
-    ctx.closePath(); ctx.stroke();
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#8a6b4a'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
     ctx.fillStyle = '#f4c784';
-    for (const p of sorted) { const q = ptXY(p); ctx.beginPath(); ctx.arc(q.x, q.y, 5, 0, Math.PI * 2); ctx.fill(); }
-    ctx.lineWidth = 1;
+    for (const p of sorted) { const q = ptXY(p); ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, Math.PI * 2); ctx.fill(); }
   }, [profile]);
   const nearest = (x: number, y: number): number | null => {
     let best: number | null = null, bestD = 18;
@@ -338,7 +340,7 @@ export function PotteryScene({ active }: SceneProps) {
       </>}
       <span className="help">{mode === 'paint' ? '捏合=落笔，转轮自动减速；对称档位会把笔画复制成环形纹样' : '单手捏合=捏泥塑形；双手捏合=整体拉长/胖瘦；鼠标可用下方轮廓编辑器'}</span>
     </div>
-    <div className="fn-host" onWheel={e => { e.preventDefault(); view.current?.zoom(e.deltaY > 0 ? 0.2 : -0.2); }}
+    <div className="geo-host" ref={host} onWheel={e => { e.preventDefault(); view.current?.zoom(e.deltaY > 0 ? 0.2 : -0.2); }}
       onPointerDown={e => { if (mode === 'paint') { const p = canvasPos(e); paintAt(p.x, p.y, true); } }}
       onPointerMove={e => { if (mode === 'paint' && lastUV.current) { const p = canvasPos(e); paintAt(p.x, p.y, false); } }}
       onPointerUp={() => { if (mode === 'paint') endStroke(); }}

@@ -61,8 +61,8 @@ export const PotteryView = forwardRef<PotteryHandle, Props>(function PotteryView
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#0c1727');
     const camera = new THREE.PerspectiveCamera(44, 1, 0.05, 100);
-    camera.position.set(0, 1.0, 2.7);
-    camera.lookAt(0, 0.34, 0);
+    camera.position.set(0, 0.85, 2.25);
+    camera.lookAt(0, 0.3, 0);
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const key = new THREE.DirectionalLight(0xfff4e0, 1.1); key.position.set(2.4, 3.2, 2.6); scene.add(key);
     key.castShadow = true;
