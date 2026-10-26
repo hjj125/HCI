@@ -48,6 +48,7 @@ const setRange = (el: Element, value: string) => {
 describe('课件视图', () => {
   it('默认是第 1 页，可前后翻页且首页禁用“上一页”', () => {
     render(<App />);
+    nav(/▤\s*课件/);
     expect(screen.getByText(/课堂模式 · 1 \/ 3/)).toBeTruthy();
     expect((screen.getByRole('button', { name: /上一页/ }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /下一页/ }));
@@ -68,6 +69,7 @@ describe('课件视图', () => {
 
   it('激光笔可按钮/L 键开关，切换视图后自动关闭', () => {
     render(<App />);
+    nav(/▤\s*课件/);
     const laser = screen.getByRole('button', { name: '激光笔' });
     expect(laser.className).not.toContain('selected');
     fireEvent.click(laser);
@@ -285,6 +287,7 @@ describe('本机 PowerPoint 桥接', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
+    nav(/▤\s*课件/);
     fireEvent.click(screen.getByRole('button', { name: '本机 PowerPoint' }));
     await screen.findByText(/demo\.pptx/);
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }));

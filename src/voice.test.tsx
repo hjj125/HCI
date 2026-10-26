@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 // 用可控的假语音识别替代 Web Speech API：测试直接驱动命令回调。
 const voice = vi.hoisted(() => ({ cb: null as null | ((cmd: unknown) => void) }));
@@ -24,6 +24,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); voice.cb = null; });
 describe('语音命令', () => {
   it('“下一页”翻页，“打开白板”切换视图，“撤销”可恢复', () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     act(() => voice.cb!({ intent: 'next' }));
     expect(screen.getByText(/课堂模式 · 2 \/ 3/)).toBeTruthy();
     act(() => voice.cb!({ intent: 'previous' }));

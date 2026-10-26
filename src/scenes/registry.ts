@@ -9,6 +9,7 @@ import { MoleculeScene } from './molecule/MoleculeScene';
 import { ReciteScene } from './recite/ReciteScene';
 import { BioMotionScene } from './biomotion/BioMotionScene';
 import { PotteryScene } from './art/PotteryScene';
+import { HomeScene } from './home/HomeScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
 import { SeasonsScene } from './geography/SeasonsScene';
@@ -19,6 +20,12 @@ import { MoonPhaseScene } from './geography/MoonPhaseScene';
  * 新增学科实验时，在对应学科下登记一行（对应总体设计方案“学科插件层”）。
  */
 export const subjects: SubjectGroup[] = [
+  {
+    id: 'home', title: '首页',
+    experiments: [
+      { id: 'home', title: '总览', icon: '⌂', description: '平台封面导航：全部实验入口与使用指引', component: HomeScene },
+    ],
+  },
   {
     id: 'tools', title: '课堂工具',
     experiments: [

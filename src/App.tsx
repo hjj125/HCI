@@ -12,7 +12,7 @@ import './styles.css';
  * 学科功能全部来自 scenes/ 注册表中的场景插件；壳本身不包含任何学科逻辑。
  */
 export default function App() {
-  const [mode, setMode] = useState<SceneId>('slides');
+  const [mode, setMode] = useState<SceneId>('home');
   const [notice, setNotice] = useState('欢迎！鼠标可独立完成全部任务。');
   const [events, setEvents] = useState<RecordedEvent[]>([]);
   const [laser, setLaser] = useState(false);

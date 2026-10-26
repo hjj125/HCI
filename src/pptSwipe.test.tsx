@@ -45,6 +45,7 @@ afterEach(() => {
 describe('挥手翻页', () => {
   it('向右挥手翻到下一页，并给出识别反馈', async () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     expect(page()).toContain('1 / 3');
     await wave(0.2, 0.72);
     await waitFor(() => expect(page()).toContain('2 / 3'));
@@ -53,6 +54,7 @@ describe('挥手翻页', () => {
 
   it('向左挥手回到上一页', async () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     fireEvent.click(screen.getByRole('button', { name: /下一页/ }));
     expect(page()).toContain('2 / 3');
     await wave(0.75, 0.25);
@@ -62,12 +64,14 @@ describe('挥手翻页', () => {
 
   it('捏合状态下的横向移动不翻页（避免伸手去点按钮时误翻）', async () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     await wave(0.2, 0.72, { pinching: true });
     expect(page()).toContain('1 / 3');
   });
 
   it('持续捏合（放松手型）下的大幅挥动也能翻页', async () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     // 捏合开始后有 0.3 秒静默；挥动持续超过静默期后应能翻页。
     await wave(0.15, 0.8, { steps: 16, gap: 40, pinching: true });
     await waitFor(() => expect(page()).toContain('2 / 3'));
@@ -75,6 +79,7 @@ describe('挥手翻页', () => {
 
   it('一边挥舞一边大幅上下移动不翻页', async () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     await wave(0.2, 0.72, { y0: 0.25, y1: 0.75 });
     expect(page()).toContain('1 / 3');
   });
@@ -86,6 +91,7 @@ describe('挥手翻页', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     fireEvent.click(screen.getByRole('button', { name: '本机 PowerPoint' }));
     await screen.findByText(/demo\.pptx/);
 
@@ -95,6 +101,7 @@ describe('挥手翻页', () => {
 
   it('白板里左右移动仍然是绘制，不会翻页', async () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     fireEvent.click(screen.getByRole('button', { name: /✎\s*白板/ }));
     await wave(0.2, 0.72);
     fireEvent.click(screen.getByRole('button', { name: /▤\s*课件/ }));
@@ -105,6 +112,7 @@ describe('挥手翻页', () => {
 describe('课件激光笔手势', () => {
   it('比“2”手势命令开关激光笔', () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     const laser = screen.getByRole('button', { name: '激光笔' });
     expect(laser.className).not.toContain('selected');
     act(() => hand.emit!({ x: .5, y: .5, phase: 'update', pinching: false, command: 'laser' }));
@@ -117,6 +125,7 @@ describe('课件激光笔手势', () => {
 describe('白板手势工具切换', () => {
   it('指向画笔/橡皮按钮捏合即可切换工具', () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     fireEvent.click(screen.getByRole('button', { name: /✎\s*白板/ }));
     const pen = screen.getByRole('button', { name: '画笔' });
     const eraser = screen.getByRole('button', { name: '橡皮' });
@@ -132,6 +141,7 @@ describe('白板手势工具切换', () => {
 
   it('数字手势命令切换画笔/橡皮', () => {
     render(<App />);
+    fireEvent.click([...document.querySelectorAll('nav button')].find(b => b.textContent?.includes('课件'))!);
     fireEvent.click(screen.getByRole('button', { name: /✎\s*白板/ }));
     const pen = screen.getByRole('button', { name: '画笔' });
     const eraser = screen.getByRole('button', { name: '橡皮' });
