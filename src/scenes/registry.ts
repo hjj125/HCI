@@ -8,6 +8,7 @@ import { PhysicsScene } from './physics/PhysicsScene';
 import { MoleculeScene } from './molecule/MoleculeScene';
 import { ReciteScene } from './recite/ReciteScene';
 import { BioMotionScene } from './biomotion/BioMotionScene';
+import { PotteryScene } from './art/PotteryScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
 import { SeasonsScene } from './geography/SeasonsScene';
@@ -55,6 +56,12 @@ export const subjects: SubjectGroup[] = [
     id: 'biology', title: '生物',
     experiments: [
       { id: 'bio-motion', title: '运动系统', icon: '⦾', description: '骨架叠加摄像头，探究关节与骨骼肌协作（演示 + 任务 A/B/C）', component: BioMotionScene },
+    ],
+  },
+  {
+    id: 'art', title: '美术',
+    experiments: [
+      { id: 'art-pottery', title: '陶艺工坊', icon: '∪', description: '手势拉坯塑形与对称纹样彩绘（演示 + 任务 A/B/C）', component: PotteryScene },
     ],
   },
   {
