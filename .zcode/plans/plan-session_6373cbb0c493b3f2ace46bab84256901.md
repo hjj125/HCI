@@ -1,61 +1,50 @@
-# 新实验：地理·五带与四季（geo-seasons）· 修订版（含任务C）
+# 生物实验一 · 运动系统——骨架叠加摄像头与关节/骨骼肌探究（bio-motion）
 
-## 目标
-在地理学科组下新增第三个实验「五带与四季」（id: `geo-seasons`），探究太阳直射点周年运动与五带划分、昼夜长短、太阳视运动与影长的关系。复用现有 GlobeView 与 solarMath 天文内核，沿用地理组既有模式：演示 + 任务 A/B/C、确定性判题、2 级提示、60 秒停滞提醒、反思提交、会话快照导出、同一套手势词汇。
+## 0. 目标与形态
 
-## 已确认的扩展点（已读码核实）
-- `SceneId`：src/core/interaction.ts:1（联合类型加一项）
-- 语音全局短语：interaction.ts:30 `VOICE_RULES`（加一行）
-- 注册表：src/scenes/registry.ts:34-39 地理组（加一行）
-- solarMath.ts 现有：subsolarPoint / sunVector / isDaylight / localTime
-- GlobeView.tsx 现有 graticule/borders/marker/highlight 的 group + useEffect 模式可直接仿写
-- DayNightScene.tsx 是场景组件模板（任务状态机/手势 policy/指针回退/快照）
+用 MediaPipe **PoseLandmarker**（现有 `@mediapipe/tasks-vision` 依赖自带，无需新包）实现 33 点全身关键点识别，把**骨架直接叠画在摄像头画面上**（用户手部星座图的全身版）。实验对准八年级生物"动物的运动系统"：屈肘/伸肘时关节角度与肱二头肌、肱三头肌的协作关系（高频考点 + 典型迷思概念）。延续平台铁律：确定性内核可单测、零新增手势词汇、任务 A/B/C、离线推理不录制。
 
-## 实施步骤
+## 1. 平台层改动（约 1–1.5 天）
 
-### Step 1 — solarMath 扩展 + 单测（约 1 天）
-在 `src/scenes/geography/solarMath.ts` 新增确定性纯函数：
-- `zoneOf(lat)`：'北寒带' | '北温带' | '热带' | '南温带' | '南寒带'（边界 ±23.44° 回归线、±66.56° 极圈）
-- `daylightHours(lat, decl)`：昼长小时数，cos H₀ = −tanφ·tanδ，clamp 后处理极昼(24h)/极夜(0h)
-- `daylightState(hours)`：'极昼' | '昼长夜短' | '昼夜平分' | '昼短夜长' | '极夜'
-- `solarAltitude(lat, decl, utcHours, lon)`：太阳高度角（sin h = sinφ·sinδ + cosφ·cosδ·cosH，H 为时角）
-- `shadowRatio(lat, decl, utcHours, lon)`：影长/标杆高 = 1/tan(h)，h≤0 返回 null（夜/太阳未升）——影长最短即正午（当地太阳时≈12）
-- `sunriseSunset(lat, decl)`：日出日落时角 H₀（供绘制当日太阳轨迹弧线，极昼/极夜返回全天/无）
+1. **模型下载**：`scripts/setup-model.mjs` 增加下载 `pose_landmarker_full.task`（约 9MB，精度优先；wasm 复用现有 `/mediapipe/wasm`）
+2. **`usePoseInput.ts` 新钩子**：与手部识别**共享同一个 `<video>` 元素**（各自独立定时循环读 `currentTime`，不去开第二个摄像头流）；仅在激活场景注册了姿态策略时才逐帧推理（其他场景零开销）；输出镜像归一化关键点 + 每点 `visibility`
+3. **服务契约扩展**：`registerPosePolicy`（与现有 registerPolicy 同构，独立的姿态策略注册表，App 只把采样转交激活场景）
+4. 手部识别循环保持不变（捏合点按钮、手势光标照旧）——两个模型并行时约 40ms/帧，够用；文档记录性能提示
 
-单测：二分二至在赤道/回归线/极圈/极点的昼长；五带边界值；正午太阳高度 = 90° − |φ−δ|（北回归线夏至正午 h=90° → 影长 0，"立竿无影"）；h≤0 全天无影（极夜）；与 isDaylight 一致性抽查。
+## 2. 确定性内核 `src/scenes/biomotion/bioMotion.ts`（约 0.5 天 + 单测）
 
-### Step 2 — GlobeView 五带渲染扩展（约 1 天）
-props 新增（**默认关闭，不影响找国家/晨昏线两实验**）：
-- `zones?: boolean`——五带可视化：半透明纬度带着色 overlay 球壳（radius ≈1.006，ShaderMaterial 按 vUv.y 分带着色）+ 四条分界纬线（回归线/极圈，亮色区别于普通经纬网）
-- `subsolarMarker?: { lat, lon } | null`——太阳直射点标记（仿现有 marker 模式）
-- `highlightZone?: string | null`——语音点名某一带时加亮该带 overlay
+- `POSE` 关键点索引常量（肩 11/12、肘 13/14、腕 15/16、髋 23/24…）与 `BONES` 骨骼连接对（画骨架用）
+- `elbowAngle(landmarks, side)`：复用 bodyAngle 的 `angleAt`（顶点=肘，两边=肩、腕）——选 visibility 较好的一侧
+- `flexState(elbowDeg)`：屈肘（≤100°）/ 半屈 / 伸肘（≥160°）判定
+- `musclePair(elbowDeg)` → `{ biceps: 0–1, triceps: 0–1 }`：二头肌收缩强度 = (160−deg)/100 截断，三头肌互补——屈肘时二头收缩三头舒张、伸肘相反（教学模型，单测锁定端点与单调性）
+- `visibilityOk(landmarks, min)`：取景判断（肩/髋可见性低 → 提示退后）
+- 单测：肘角精确值（直角配置=90°）、musclePair 端点/单调、flexState 阈值、visibility 判定
 
-### Step 3 — SeasonsScene 新组件（约 1.5–2 天）
-新建 `src/scenes/geography/SeasonsScene.tsx`（以 DayNightScene 为模板）：
-- 控件：日期滑杆 doy 1–365、节气按钮 ×4（复用 DATES）、播放键（doy 缓慢推进演示一年）、直射纬度实时显示、五带/经纬网开关
-- 演示模式：点选国家/海洋 → 显示纬度、所属五带、当日昼长、极昼极夜状态
-- **任务 A · 五带与昼夜预测**：题库（城市 + 节气），学生预测「五带」+「昼夜状态」，`zoneOf` + `daylightHours` 确定性判题，提交后地球调至该日期并 flyTo 城市验证
-- **任务 B · 追寻极昼**：目标点（摩尔曼斯克 68.97°N、朗伊尔城 78.2°N、中山站 69.4°S）调整日期使目标极昼/极夜，判定达成 + 反思提交
-- **任务 C · 太阳视运动与影长（影子实验室）**：
-  - 剖面影子视图（2D canvas，与白板/物理渲染一致）：地平线 + 当日太阳轨迹弧线（随 doy 与纬度变化）+ 当前太阳位置点 + 标杆与影长实时变化
-  - 一天时间滑杆（UTC，驱动太阳在弧线上移动；与晨昏线 UTC 滑杆心智一致）
-  - **全局—局部联动**：在地球点选城市 → 影子视图切到该纬度；是答辩可讲的"多视图联动建立空间认知"设计点
-  - 轻判题：把太阳调到当日影长最短时刻（当地正午，太阳时≈12:00，确定性判定）；达成后观察不同节气弧线高低与影长对比，反思提交
-  - 彩蛋教学点：北回归线夏至正午"立竿无影"（影长=0）、极昼时太阳整日不落
-- 手势：与晨昏线完全同套 policy（捏合选中/拖动旋转/挥手惯性/双手缩放），零新增手势词汇
-- 语音：场景级 `registerVoicePolicy`——"春分/夏至/秋分/冬至"跳节气、"热带/北温带/…"高亮对应带、"正午"直跳正午时刻；播报后沿用 `pauseRecognition` 防自激
-- 快照：`useSceneSnapshot('geo-seasons', …)` 记录任务/日期/预测/判题/反思 + 任务C 的纬度/时刻/是否达成最短影长；intent 全部复用现有 predict/hint/submit/run/pause/reset，无需新增
+## 3. 场景 `BioMotionScene.tsx` + 摄像头叠加视图（约 1.5 天）
 
-### Step 4 — 注册与全局接入（约 0.5 小时）
-- interaction.ts SceneId 加 `'geo-seasons'`
-- VOICE_RULES 加 `['四季', { intent: 'switch', value: 'geo-seasons' }]`
-- registry.ts 地理组登记：`{ id: 'geo-seasons', title: '五带与四季', icon: '☀', description: '五带划分、昼夜长短与太阳视运动影长探究（演示 + 任务 A/B/C）', component: SeasonsScene }`
+- **PoseOverlay 画布**：`drawImage(video)`（镜像）把摄像头画面画进大画布 → 叠加青色骨架（骨线+关节点）→ 肘关节琥珀色角度弧线 + "肘关节 ≈ 87°" 标注 → 可开关"关节标注"（肩/肘/腕名称chip）
+- **肌肉状态仪表**：侧栏两根收缩强度条（肱二头肌/肱三头肌）+ 状态文字（收缩/舒张），随 elbowDeg 实时变化——屈肘时亲眼看到"二头鼓起来、三头放松"
+- **取景引导**：肩/髋 visibility 低 → 黄字提示"请退后一些，让上半身完整入镜"；摄像头未启用 → 画布显示引导文案
+- 手势零新增：读数自动实时显示；锁定/解锁复用捏合点击语义与按钮；语音"读数"（TTS 播报肘角与肌肉状态，防自激）
+- **任务**：
+  - **A · 肌肉协作预测**："屈肘时肱二头肌与肱三头肌的状态？"四选一（正确答案=二头收缩·三头舒张——直击"只有二头收缩"的迷思）；提交后现场屈肘，看肌肉仪表验证
+  - **B · 屈肘 90°**：肘角 90°±10°，稳定后锁定判定（复用量角器的 stabilize 逻辑）
+  - **C · 屈伸对比**：屈肘、伸肘各锁定保存一次快照，肌肉仪表并排对比 + 反思"骨骼肌只能牵拉不能推开，为什么要两组肌肉协作？"
+- 快照：任务、肘角、屈伸状态、肌肉强度、预测/判定/反思
 
-### Step 5 — 测试、文档与 README 收尾（约 0.5–1 天）
-- solarMath 新函数用例 + 场景交互测试（任务 A 判题、任务 B 达成、任务 C 正午判定、语音策略、快照字段）
-- 全量 `npm test` 通过（106 项 → 约 125 项）
-- README：实验列表加入新实验；顺手修正两处失同步（AI 接口"1.5s/200 次"→ 实际 800ms/300 次；"功能边界"中"第二学科场景尚未实现"的过期表述）
-- 新建 `docs/plans/seasons-scene-design.md` 简短设计文档（与 geography-scene-design.md 同风格，注明"太阳视运动"术语以区别于教材"太阳活动"，供课程报告引用）
+## 4. 注册与收尾（约 0.5 天）
 
-## 工期与后续
-合计约 4–5 天，≥4 周预算内从容。完成后可再议的后续方向（不在本计划内实施）：找国家·双人对战（热座计分）、数学·人体函数绘图仪、物理·光学光路、日晷盘/影子方位角俯视图（可从任务C 升级为独立实验四）；若最终需要用户实验报告，可再加内嵌 SUS/NASA-TLX 问卷（约半天）。
+- 新学科组"生物"：`{ id: 'bio-motion', title: '运动系统', icon: '⦾', description: '骨架叠加摄像头，探究关节与骨骼肌协作（演示 + 任务 A/B/C）' }`
+- `SceneId` 增 `'bio-motion'`；`VOICE_RULES` 增 `['生物', …]`；README 同步（导航表、学科段落、已实现清单、测试计数）；设计文档入库 `docs/plans/bio-motion-design.md`
+- 场景测试：接入/任务门控（jsdom 无摄像头，内核逻辑靠单测锁定——沿用既有模式）
+
+## 5. 工期与风险
+
+合计约 **4 天**：平台 1–1.5 + 内核 0.5 + 场景 1.5 + 收尾 0.5。
+
+| 风险 | 对策 |
+|---|---|
+| 双模型同帧 GPU 压力 | 非激活场景跳过姿态推理；必要时降级 pose lite 模型 |
+| 桌前取景拍不到下肢 | 上肢动作为主；visibility 低时提示退后 |
+| 光照不足关键点抖动 | 稳定窗口取中位数（复用量角器方案） |
+| 隐私 | 沿用既有边界：本地推理、不录制、不保存 |
