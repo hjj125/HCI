@@ -12,7 +12,7 @@
 - **塑形操作**：`stretchProfile`（拉长/压缩，底不动）、`scaleRadius`（胖瘦）、`pinchProfile`（高斯衰减的局部捏塑——"手在哪捏哪"）、`smoothProfile`（半径移动平均抑制手抖毛刺）；
 - **度量与分类**：`potMetrics`（高度/最大半径及相对位置/体积 Σπr̄²dy/长宽比 aspect=height÷2maxR）、`classifyShape`（碗=宽扁且最宽处偏下、瓶=aspect≥1.4、自由造型）；
 - **彩绘数学**：`strokeSegments`（笔迹插值防断线）、`symmetricStamps`（n 重旋转对称副本）、`coverageRatio`（素坯底色偏离像素统计）；
-- 11 项单测：默认坯合法性、三操作钳位数学、Catmull-Rom 插值单调性、圆柱体积与 πr²h 对照、三分类、对称复制、笔迹插值、覆盖率端点。
+- 12 项单测（含顶部切割）：默认坯合法性、三操作钳位数学、Catmull-Rom 插值单调性、圆柱体积与 πr²h 对照、三分类、对称复制、笔迹插值、覆盖率端点。
 
 ## 3. 三维视图 `PotteryView.tsx`（CubeView 生命周期模式）
 
@@ -37,6 +37,8 @@
 | A · 拉坯规律预测 | 迷思概念三选一 | 正确=「变高变薄」（泥量守恒，拉高必变薄——真实拉坯规律）；提交后现场验证 |
 | B · 造型挑战 | 构造（目标循环） | 「高瘦的瓶」aspect≥1.4 /「宽扁的碗」aspect≤0.85 且 maxRy≤0.45——metrics 确定性判题 |
 | C · 对称纹样彩绘 | 创作 + 量化判定 | 覆盖率≥6%（coverageRatio 像素统计）+ 釉色≥2 种 + ≥2 重对称 |
+| 工具 · 顶部切割 | 割泥线 | `clipProfile`：保留切割高度以下轮廓、切口压平（参考同类手势陶艺产品的"切割"能力） |
+| 工具 · 导出 | 作品照 PNG / 3D 模型 GLB（含彩绘贴图） | preserveDrawingBuffer 截帧 + GLTFExporter 二进制导出 |
 
 ## 6. 测试与边界
 

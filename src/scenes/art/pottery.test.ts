@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   defaultProfile, stretchProfile, scaleRadius, pinchProfile, smoothProfile, lathePoints,
-  potMetrics, classifyShape, strokeSegments, symmetricStamps, coverageRatio, Y_MAX, R_MAX,
+  potMetrics, classifyShape, strokeSegments, symmetricStamps, coverageRatio, clipProfile, Y_MAX, R_MAX,
 } from './pottery';
 
 describe('陶艺内核 · 塑形操作', () => {
@@ -57,6 +57,16 @@ describe('陶艺内核 · 度量与造型分类', () => {
     const vase = [{ y: 0.02, r: 0.3 }, { y: 0.5, r: 0.35 }, { y: 1.1, r: 0.3 }];
     expect(classifyShape(vase)).toBe('瓶');
     expect(classifyShape(defaultProfile())).toBe('自由造型');
+  });
+  it('顶部切割：切口压平，以下轮廓保留', () => {
+    const base = defaultProfile();
+    const cut = clipProfile(base, 0.6);
+    expect(Math.max(...cut.map(p => p.y))).toBeCloseTo(0.6, 9);      // 顶被压平在切割高度
+    expect(cut.every(p => p.y <= 0.6 + 1e-9)).toBe(true);
+    expect(cut.length).toBeLessThan(base.length);                    // 顶部点被移除
+    const mid = cut.find(p => Math.abs(p.y - 0.6) < 1e-9)!;
+    expect(mid.r).toBeCloseTo(0.55, 6);                              // 圆柱在 0.6 处半径不变
+    expect(clipProfile(base, 0.01).length).toBeGreaterThan(0);       // 极低切割仍保留底部
   });
 });
 

@@ -5,7 +5,7 @@ import { speak, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServic
 import { SwipeDetector } from '../slides/pptGesture';
 import { PotteryView, type PotteryHandle } from './PotteryView';
 import {
-  BASE_CLAY, classifyShape, coverageRatio, defaultProfile, pinchProfile, potMetrics, scaleRadius,
+  BASE_CLAY, classifyShape, clipProfile, coverageRatio, defaultProfile, pinchProfile, potMetrics, scaleRadius,
   smoothProfile, stretchProfile, strokeSegments, symmetricStamps,
   type Profile, type TexPoint,
 } from './pottery';
@@ -88,6 +88,7 @@ export function PotteryScene({ active }: SceneProps) {
   const [glazeIdx, setGlazeIdx] = useState(0);
   const [brush, setBrush] = useState<1 | 2 | 3>(2);
   const [symmetry, setSymmetry] = useState<1 | 2 | 4 | 8>(1);
+  const [cutY, setCutY] = useState(0.7);
   const [coverage, setCoverage] = useState(0);
   const [usedGlazeCount, setUsedGlazeCount] = useState(0);
   const [symUsed, setSymUsed] = useState(1);
@@ -304,6 +305,22 @@ export function PotteryScene({ active }: SceneProps) {
   }));
 
 /** 任务 A 选项（正确答案固定为第 0 项——真实拉坯规律）。 */
+  const downloadBlob = (blob: Blob, name: string) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const exportPhoto = () => {
+    const url = view.current?.snapshot();
+    if (!url) { notify('视图未就绪。'); return; }
+    const a = document.createElement('a'); a.href = url; a.download = '陶艺作品.png'; a.click();
+    notify('作品照片已导出（PNG）。');
+  };
+  const exportModel = () => {
+    view.current?.exportGLB().then(blob => { downloadBlob(blob, '陶艺作品.glb'); notify('3D 模型已导出（GLB，含彩绘贴图）。'); })
+      .catch(() => notify('3D 模型导出失败——请确认三维视图已加载。'));
+  };
+
   const HINTS: Record<Task, string[]> = {
     free: ['单手捏合后左右移动=在对应高度收放器壁；双手捏合同向上下=拉长/压缩。', '切换到彩绘模式，捏合落笔在陶坯上上釉。', '挥手可以让陶轮加速。'],
     A: ['泥料总量不变：拉高时泥去哪里了？', '观察真实拉坯视频：向上提拉时器壁越来越薄。', '提交后现场用双手向上提验证。'],
@@ -338,6 +355,13 @@ export function PotteryScene({ active }: SceneProps) {
         <span role="group" aria-label="对称"> {[1, 2, 4, 8].map(n => <button key={n} className={symmetry === n ? 'selected' : ''} onClick={() => setSymmetry(n as 1 | 2 | 4 | 8)}>{n === 1 ? '自由' : `${n}重对称`}</button>)} </span>
         <button onClick={clearPaint}>清除彩绘</button>
       </>}
+      {mode === 'throw' && <>
+        <span className="eyebrow" style={{ marginRight: 0 }}>切割高度 {cutY.toFixed(2)}</span>
+        <input aria-label="切割高度" type="range" min={0.1} max={1.1} step={0.05} value={cutY} onChange={e => setCutY(Number(e.target.value))} style={{ width: 120 }} />
+        <button onClick={() => { setProfile(p => clipProfile(p, cutY)); notify(`已沿高度 ${cutY.toFixed(2)} 水平切割。`); }}>执行切割</button>
+      </>}
+      <button onClick={exportPhoto}>导出作品照</button>
+      <button onClick={exportModel}>导出3D模型</button>
       <span className="help">{mode === 'paint' ? '捏合=落笔，转轮自动减速；对称档位会把笔画复制成环形纹样' : '单手捏合=捏泥塑形；双手捏合=整体拉长/胖瘦；鼠标可用下方轮廓编辑器'}</span>
     </div>
     <div className="geo-host" ref={host} onWheel={e => { e.preventDefault(); view.current?.zoom(e.deltaY > 0 ? 0.2 : -0.2); }}

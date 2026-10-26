@@ -121,4 +121,21 @@ export function coverageRatio(data: Uint8ClampedArray, base: [number, number, nu
 }
 
 /** 素坯底色（RGB）。 */
+/** 顶部切割（割泥线）：保留 yCut 以下的轮廓，切口压平为水平面。 */
+export function clipProfile(profile: Profile, yCut: number): Profile {
+  const sorted = [...profile].sort((a, b) => a.y - b.y);
+  const kept = sorted.filter(p => p.y <= yCut);
+  if (!kept.length) return sorted;
+  const top = kept[kept.length - 1];
+  if (yCut > top.y) {
+    const idx = sorted.indexOf(top);
+    const next = sorted[idx + 1];
+    const rNext = next ? next.r : top.r;
+    const t = next && next.y !== top.y ? (yCut - top.y) / (next.y - top.y) : 0;
+    const rCut = top.r + (rNext - top.r) * Math.min(1, Math.max(0, t));
+    kept.push({ y: clampY(yCut), r: clampR(rCut) });
+  }
+  return kept;
+}
+
 export const BASE_CLAY: [number, number, number] = [201, 169, 134];

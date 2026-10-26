@@ -1,11 +1,16 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { lathePoints, type Profile } from './pottery';
 
 export type PotteryHandle = {
   zoom(delta: number): void;
   /** 屏幕归一化坐标 → 陶坯表面命中；onClay=false 表示命中捏合代理柱（手在坯附近但没碰到泥）。 */
   pick(nx: number, ny: number): { u: number; v: number; py: number; dirSign: 1 | -1; onClay: boolean } | null;
+  /** 渲染当前帧并返回 PNG dataURL（导出作品照）。 */
+  snapshot(): string;
+  /** 导出陶坯为 GLB 二进制（含彩绘贴图）。 */
+  exportGLB(): Promise<Blob>;
 };
 type Props = {
   hostRef: React.RefObject<HTMLDivElement | null>;
@@ -47,12 +52,27 @@ export const PotteryView = forwardRef<PotteryHandle, Props>(function PotteryView
       }
       return null;
     },
+    snapshot() {
+      const w = world.current; if (!w) return '';
+      w.renderer.render(w.scene, w.camera);   // preserveDrawingBuffer 下 toDataURL 取当帧
+      return w.renderer.domElement.toDataURL('image/png');
+    },
+    exportGLB() {
+      const w = world.current;
+      if (!w) return Promise.reject(new Error('视图未就绪'));
+      return new Promise<Blob>((resolve, reject) => {
+        new GLTFExporter().parse(w.clay, gltf => {
+          const json = gltf as ArrayBuffer | object;
+          resolve(new Blob([json as ArrayBuffer], { type: 'model/gltf-binary' }));
+        }, err => reject(err instanceof Error ? err : new Error(String(err))), { binary: true });
+      });
+    },
   }), []);
 
   useEffect(() => {
     const el = hostRef.current; if (!el) return;
     let renderer: THREE.WebGLRenderer;
-    try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
+    try { renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); }
     catch { el.textContent = 'WebGL 不可用，请启用硬件加速。任务面板仍可使用。'; return; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
@@ -102,7 +122,7 @@ export const PotteryView = forwardRef<PotteryHandle, Props>(function PotteryView
       renderer.render(scene, camera);
     };
     tick();
-    world.current = { camera, clay, pinchProxy, observer, renderer };
+    world.current = { camera, scene, clay, pinchProxy, observer, renderer };
     return () => {
       cancelAnimationFrame(frame); observer.disconnect();
       scene.traverse(obj => {
