@@ -118,12 +118,20 @@ export function PotteryScene({ active }: SceneProps) {
   const emit = (intent: Parameters<typeof bus.emit>[0]['intent'], value?: string, source: Parameters<typeof bus.emit>[0]['source'] = 'mouse') =>
     bus.emit({ scene: 'art-pottery', source, intent, phase: 'end', value });
 
-  // 素坯底色填充（一次）；创建纹理画布。
+  // 素坯底色（纯色+陶土颗粒，颗粒偏差在覆盖率容差内）填充；创建纹理画布。
   useEffect(() => {
     const c = document.createElement('canvas');
     c.width = TEX_W; c.height = TEX_H;
     const ctx = c.getContext('2d');
-    if (ctx) { ctx.fillStyle = `rgb(${BASE_CLAY[0]},${BASE_CLAY[1]},${BASE_CLAY[2]})`; ctx.fillRect(0, 0, TEX_W, TEX_H); }
+    if (ctx) {
+      ctx.fillStyle = `rgb(${BASE_CLAY[0]},${BASE_CLAY[1]},${BASE_CLAY[2]})`;
+      ctx.fillRect(0, 0, TEX_W, TEX_H);
+      for (let i = 0; i < 900; i++) {   // 陶土颗粒
+        const a = Math.round(Math.random() * 10 - 5);
+        ctx.fillStyle = `rgba(${201 + a},${169 + a},${134 + a},0.55)`;
+        ctx.beginPath(); ctx.arc(Math.random() * TEX_W, Math.random() * TEX_H, Math.random() * 1.6 + 0.4, 0, Math.PI * 2); ctx.fill();
+      }
+    }
     tex.current = c;
   }, []);
 
@@ -181,17 +189,19 @@ export function PotteryScene({ active }: SceneProps) {
       return;
     }
     if (pinchLastX.current != null) {
-      // 捏泥式：作用高度跟随手（屏幕高度→陶坯高度），横向移动=该处收/放半径（增量应用）。
-      const yA = Math.max(0.05, Math.min(1.15, 1.1 - sampleY * 1.1));
+      // 捏泥式：手指"碰哪捏哪"——raycast 命中陶坯取作用高度与内外侧；手在坯附近但没碰到泥时用代理柱，离坯太远退回屏幕映射。
+      const hit = view.current?.pick(sampleX, sampleY);
+      const yA = Math.max(0.05, Math.min(1.15, hit ? hit.py : 1.1 - sampleY * 1.1));
+      const dirSign = hit ? hit.dirSign : (sampleX < 0.5 ? -1 : 1);
       const dx = sampleX - pinchLastX.current;
       pinchLastX.current = sampleX;
-      if (Math.abs(dx) > 0.0005) setProfile(p => smoothProfile(pinchProfile(p, yA, dx * 1.5), 1));
+      if (Math.abs(dx) > 0.0005) setProfile(p => smoothProfile(pinchProfile(p, yA, dx * dirSign * 1.6), 1));
     }
   };
 
   const paintAt = (nx: number, ny: number, isStart: boolean) => {
     const hit = view.current?.pick(nx, ny);
-    if (!hit) { lastUV.current = null; return; }
+    if (!hit || !hit.onClay) { lastUV.current = null; return; }   // 没碰到泥不落笔
     if (isStart || !lastUV.current) { lastUV.current = hit; stampAt(hit); return; }
     const stamps = strokeSegments(lastUV.current, hit, BRUSH_PX[brush - 1] / (TEX_W * 0.5));
     for (const s of symmetricStamps(stamps, symmetry)) {

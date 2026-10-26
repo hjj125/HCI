@@ -4,8 +4,8 @@ import { lathePoints, type Profile } from './pottery';
 
 export type PotteryHandle = {
   zoom(delta: number): void;
-  /** 屏幕归一化坐标 → 陶坯表面命中（uv），未命中返回 null（彩绘用）。 */
-  pick(nx: number, ny: number): { u: number; v: number } | null;
+  /** 屏幕归一化坐标 → 陶坯表面命中；onClay=false 表示命中捏合代理柱（手在坯附近但没碰到泥）。 */
+  pick(nx: number, ny: number): { u: number; v: number; py: number; dirSign: 1 | -1; onClay: boolean } | null;
 };
 type Props = {
   hostRef: React.RefObject<HTMLDivElement | null>;
@@ -36,8 +36,16 @@ export const PotteryView = forwardRef<PotteryHandle, Props>(function PotteryView
       const w = world.current; if (!w) return null;
       const ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2(nx * 2 - 1, -(ny * 2 - 1)), w.camera);
-      const hit = ray.intersectObject(w.clay, false)[0];
-      return hit && hit.uv ? { u: hit.uv.x, v: hit.uv.y } : null;
+      const clayHit = ray.intersectObject(w.clay, false)[0];
+      if (clayHit && clayHit.uv) {
+        return { u: clayHit.uv.x, v: clayHit.uv.y, py: clayHit.point.y / Y_SCALE, dirSign: (clayHit.point.x >= 0 ? 1 : -1) as 1 | -1, onClay: true };
+      }
+      // 手在坯附近但没碰到泥：用隐形代理柱取高度与内外侧，仍可捏塑。
+      const proxyHit = ray.intersectObject(w.pinchProxy, false)[0];
+      if (proxyHit) {
+        return { u: 0, v: 0, py: proxyHit.point.y / Y_SCALE, dirSign: (proxyHit.point.x >= 0 ? 1 : -1) as 1 | -1, onClay: false };
+      }
+      return null;
     },
   }), []);
 
@@ -47,27 +55,41 @@ export const PotteryView = forwardRef<PotteryHandle, Props>(function PotteryView
     try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
     catch { el.textContent = 'WebGL 不可用，请启用硬件加速。任务面板仍可使用。'; return; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     el.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#0c1727');
     const camera = new THREE.PerspectiveCamera(44, 1, 0.05, 100);
     camera.position.set(0, 1.0, 2.7);
     camera.lookAt(0, 0.34, 0);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const key = new THREE.DirectionalLight(0xfff4e0, 0.95); key.position.set(2.4, 3.2, 2.6); scene.add(key);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    const key = new THREE.DirectionalLight(0xfff4e0, 1.1); key.position.set(2.4, 3.2, 2.6); scene.add(key);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    Object.assign(key.shadow.camera, { left: -1.6, right: 1.6, top: 1.6, bottom: -1.6, near: 0.5, far: 10 });
     const fill = new THREE.DirectionalLight(0xbfd4ff, 0.35); fill.position.set(-3, 1.5, -1.5); scene.add(fill);
-    // 陶轮：转盘 + 底座（只转转盘与陶坯同组，底座静止）。
+    // 陶轮：木质转盘 + 深色底座（只转转盘与陶坯同组，底座静止）。
     const wheelGroup = new THREE.Group();
-    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.82, 0.05, 48), new THREE.MeshPhongMaterial({ color: 0x33415e, shininess: 18 }));
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.82, 0.05, 48), new THREE.MeshStandardMaterial({ color: 0x6e4f30, roughness: 0.65 }));
     disc.position.y = 0.02;
+    disc.receiveShadow = true;
     wheelGroup.add(disc);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.022, 10, 48), new THREE.MeshStandardMaterial({ color: 0x2b2317, roughness: 0.8 }));
+    rim.rotation.x = Math.PI / 2; rim.position.y = 0.045;
+    wheelGroup.add(rim);
     scene.add(wheelGroup);
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 0.26, 32), new THREE.MeshPhongMaterial({ color: 0x1a2436 }));
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 0.26, 32), new THREE.MeshStandardMaterial({ color: 0x1a2436, roughness: 0.7 }));
     base.position.y = -0.12;
     scene.add(base);
     // 陶坯：初始空几何，由 profile effect 首次重建。
-    const clay = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 10 }));
+    const clay = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.04 }));
+    clay.castShadow = true;
     scene.add(clay);
+    // 捏合代理柱：手指在坯附近但未碰到泥时仍可取高度与内外侧（渲染不可见）。
+    const pinchProxy = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.72, 16), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+    pinchProxy.position.y = 0.32;
+    scene.add(pinchProxy);
     const grid = new THREE.GridHelper(6, 24, 0x1c2c44, 0x141f33); grid.position.y = -0.25; scene.add(grid);
     const resize = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h); camera.aspect = h ? w / h : 1; camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize); observer.observe(el); resize();
@@ -80,7 +102,7 @@ export const PotteryView = forwardRef<PotteryHandle, Props>(function PotteryView
       renderer.render(scene, camera);
     };
     tick();
-    world.current = { camera, clay, observer, renderer };
+    world.current = { camera, clay, pinchProxy, observer, renderer };
     return () => {
       cancelAnimationFrame(frame); observer.disconnect();
       scene.traverse(obj => {

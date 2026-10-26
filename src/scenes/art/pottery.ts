@@ -10,9 +10,10 @@ export const Y_MIN = 0.02, Y_MAX = 1.2, R_MIN = 0.05, R_MAX = 1;
 const clampY = (y: number) => Math.max(Y_MIN, Math.min(Y_MAX, y));
 const clampR = (r: number) => Math.max(R_MIN, Math.min(R_MAX, r));
 
-/** 初始圆柱陶坯。 */
+/** 初始圆柱陶坯（24 环带控制点，捏塑粒度细腻）。 */
 export function defaultProfile(): Profile {
-  return [0.02, 0.25, 0.5, 0.75, 1.0].map(y => ({ y, r: 0.55 }));
+  const n = 24;
+  return Array.from({ length: n }, (_, i) => ({ y: 0.02 + (i * (1.0 - 0.02)) / (n - 1), r: 0.55 }));
 }
 
 /** 拉长/压缩：整体高度缩放（底不动，y 钳位）。 */
@@ -26,7 +27,7 @@ export function scaleRadius(profile: Profile, factor: number): Profile {
 }
 
 /** 局部捏塑：在高度 yTarget 附近以高斯衰减改变半径（deltaR>0 外推、<0 内收）。 */
-export function pinchProfile(profile: Profile, yTarget: number, deltaR: number, sigma = 0.12): Profile {
+export function pinchProfile(profile: Profile, yTarget: number, deltaR: number, sigma = 0.09): Profile {
   return profile.map(p => {
     const w = Math.exp(-((p.y - yTarget) ** 2) / (2 * sigma * sigma));
     return { y: p.y, r: clampR(p.r + deltaR * w) };

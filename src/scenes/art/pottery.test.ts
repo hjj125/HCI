@@ -27,11 +27,12 @@ describe('陶艺内核 · 塑形操作', () => {
   });
   it('局部捏塑：目标高度附近生效，远处不变；平滑抑制毛刺', () => {
     const base = defaultProfile();
-    const pinched = pinchProfile(base, 0.5, 0.3, 0.1);
-    const mid = pinched.find(p => Math.abs(p.y - 0.5) < 1e-9)!;
-    expect(mid.r).toBeCloseTo(0.85, 6);                 // 高斯权重≈1
-    const far = pinched.find(p => Math.abs(p.y - 0.02) < 1e-9)!;
-    expect(far.r).toBeLessThan(0.5601);                 // 距离 0.48 衰减后影响极小
+    const pinched = pinchProfile(base, 0.5, 0.3, 0.09);
+    const nearest = pinched.reduce((a, b) => (Math.abs(b.y - 0.5) < Math.abs(a.y - 0.5) ? b : a));
+    expect(nearest.r).toBeGreaterThan(0.62);            // 最近环带明显隆起
+    expect(nearest.r).toBeLessThan(0.86);               // 高斯权重 <1
+    const far = pinched[0];
+    expect(far.r).toBeLessThan(0.5601);                 // 底部几乎不变
     const bumpy = [{ y: 0.1, r: 0.5 }, { y: 0.4, r: 0.8 }, { y: 0.7, r: 0.5 }];
     expect(smoothProfile(bumpy)[1].r).toBeCloseTo((0.5 + 0.8 * 2 + 0.5) / 4, 9);
   });
