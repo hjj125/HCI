@@ -23,7 +23,7 @@ type Props = {
   speed: number;
 };
 
-const R_SCALE = 0.52, Y_SCALE = 0.55;
+const R_SCALE = 0.52, Y_SCALE = 0.8;   // 纵向比例拉高：默认圆柱高径比 ≈ 1.4，避免矮胖
 
 /** 陶艺轮盘视图：转盘持续旋转，陶坯为 LatheGeometry 旋转体，表面贴彩绘 CanvasTexture。
  *  生命周期遵循 CubeView 模式：场景一次创建、profile 变化节流重建几何、tick 不引用 world.current。 */

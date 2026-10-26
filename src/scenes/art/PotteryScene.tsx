@@ -356,6 +356,9 @@ export function PotteryScene({ active }: SceneProps) {
         <button onClick={clearPaint}>清除彩绘</button>
       </>}
       {mode === 'throw' && <>
+        <span className="eyebrow" style={{ marginRight: 0 }}>高度 {metrics.height.toFixed(2)}</span>
+        <input aria-label="陶坯高度" type="range" min={0.1} max={1.2} step={0.02} value={Math.min(metrics.height, 1.2)}
+          onChange={e => { const target = Number(e.target.value); setProfile(p => stretchProfile(p, target / Math.max(potMetrics(p).height, 0.02))); }} style={{ width: 120 }} />
         <span className="eyebrow" style={{ marginRight: 0 }}>切割高度 {cutY.toFixed(2)}</span>
         <input aria-label="切割高度" type="range" min={0.1} max={1.1} step={0.05} value={cutY} onChange={e => setCutY(Number(e.target.value))} style={{ width: 120 }} />
         <button onClick={() => { setProfile(p => clipProfile(p, cutY)); notify(`已沿高度 ${cutY.toFixed(2)} 水平切割。`); }}>执行切割</button>
