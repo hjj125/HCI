@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSettings, useServices } from '../../core/services';
+import { subjects } from '../registry';
 import { SwipeDetector } from './pptGesture';
 import { PowerPointPanel } from './PowerPointPanel';
 
@@ -89,7 +90,23 @@ export function SlidesScene({ active }: SceneProps) {
         <div className="eyebrow">课堂模式 · {slide + 1} / {images.length || 3}</div>
         {images.length
           ? <img src={images[slide]} alt={`课件第 ${slide + 1} 页`} style={{ width: '100%', height: 360, objectFit: 'contain', marginTop: 20 }} />
-          : <><h1>{slideTitles[slide]}</h1><p>{slideTexts[slide]}</p></>}
+          : slide === 0
+            ? <div className="slide-cover">
+                <div className="cover-glow g1" /><div className="cover-glow g2" />
+                <div className="cover-eyebrow">EMBODIEDEDU · 灵境智学 · 具身学习多模态交互平台</div>
+                <h1 className="cover-title">让知识，可以被操作</h1>
+                <p className="cover-sub">八大学科 · 十四个实验 —— 手势、语音、鼠标与键盘在同一个交互内核里，连接课堂讲解与动手探究。点击任意卡片直接进入：</p>
+                <div className="cover-grid">
+                  {subjects.flatMap(g => g.experiments.map(s => (
+                    <button key={s.id} aria-label={`进入${s.title}实验`} title={s.description} onClick={() => emit('switch', s.id)}>
+                      <span className="scene-icon">{s.icon}</span>
+                      <span>{s.title}<small>{g.title}</small></span>
+                    </button>
+                  )))}
+                </div>
+                <p className="help">手掌向左/向右挥动可翻页；以下翻页与工具在演示与授课中随时可用。</p>
+              </div>
+            : <><h1>{slideTitles[slide]}</h1><p>{slideTexts[slide]}</p></>}
         <div className="slide-controls">
           <button disabled={slide === 0} onClick={() => emit('previous')}>← 上一页</button>
           <button disabled={slide === (images.length || 3) - 1} onClick={() => emit('next')}>下一页 →</button>
@@ -97,7 +114,7 @@ export function SlidesScene({ active }: SceneProps) {
           <button onClick={() => emit('switch', 'whiteboard')}>打开白板</button>
         </div>
         <p className="help">手掌向左/向右挥动可翻页；比“2”保持约 0.6 秒开关激光笔（或按 L 键）；也支持方向键，或切换到本机 PowerPoint 控制。</p>
-        <label className="small">导入图片课件 <input className="file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={e => {
+        <label className="file-chip">📂 导入图片课件 <input className="file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={e => {
           const files = Array.from(e.target.files || []);
           if (files.length) {
             urls.current.forEach(URL.revokeObjectURL);
