@@ -138,4 +138,5 @@ export function clipProfile(profile: Profile, yCut: number): Profile {
   return kept;
 }
 
-export const BASE_CLAY: [number, number, number] = [201, 169, 134];
+/** 素坯底色（RGB，瓷白）。 */
+export const BASE_CLAY: [number, number, number] = [247, 241, 231];

@@ -43,11 +43,11 @@ function ProfileEditor({ profile, onChange }: { profile: Profile; onChange: (p: 
     ctx.strokeStyle = '#26394f'; ctx.beginPath(); ctx.moveTo(20, H - 14); ctx.lineTo(W - 20, H - 14); ctx.stroke();
     const sorted = [...profile].sort((a, b) => a.y - b.y);
     // 陶坯侧影：填充陶土色，一眼读出"这是个器物"
-    ctx.fillStyle = '#c9a986'; ctx.beginPath();
+    ctx.fillStyle = '#f7f1e7'; ctx.beginPath();
     sorted.forEach((p, i) => { const q = ptXY(p); if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y); });
     for (let i = sorted.length - 1; i >= 0; i--) { const q = ptXY({ ...sorted[i], r: -sorted[i].r }); ctx.lineTo(q.x, q.y); }
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = '#8a6b4a'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
+    ctx.strokeStyle = '#b8a184'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
     ctx.fillStyle = '#f4c784';
     for (const p of sorted) { const q = ptXY(p); ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, Math.PI * 2); ctx.fill(); }
   }, [profile]);
@@ -129,9 +129,9 @@ export function PotteryScene({ active }: SceneProps) {
     if (ctx) {
       ctx.fillStyle = `rgb(${BASE_CLAY[0]},${BASE_CLAY[1]},${BASE_CLAY[2]})`;
       ctx.fillRect(0, 0, TEX_W, TEX_H);
-      for (let i = 0; i < 900; i++) {   // 陶土颗粒
-        const a = Math.round(Math.random() * 10 - 5);
-        ctx.fillStyle = `rgba(${201 + a},${169 + a},${134 + a},0.55)`;
+      for (let i = 0; i < 1500; i++) {   // 陶土颗粒（偏差在覆盖率容差内）
+        const a = Math.round(Math.random() * 8 - 4);
+        ctx.fillStyle = `rgba(${BASE_CLAY[0] + a},${BASE_CLAY[1] + a},${BASE_CLAY[2] + a},0.55)`;
         ctx.beginPath(); ctx.arc(Math.random() * TEX_W, Math.random() * TEX_H, Math.random() * 1.6 + 0.4, 0, Math.PI * 2); ctx.fill();
       }
     }
