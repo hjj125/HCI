@@ -118,6 +118,49 @@ export function useScenePosePolicy(scene: SceneId, handler: (sample: PoseSample)
   }, [scene, registerPosePolicy]);
 }
 
+/* 音色优选缓存：voices 列表异步加载，监听 voiceschanged 保持最新。 */
+let cachedVoices: SpeechSynthesisVoice[] = [];
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  const refresh = () => { cachedVoices = window.speechSynthesis.getVoices(); };
+  refresh();
+  window.speechSynthesis.addEventListener?.('voiceschanged', refresh);
+}
+
+/** Edge 的在线神经音色（晓晓/云希）需连微软语音服务；网络受限时会静默失败——
+ *  失败后 90 秒内降级本地音色，之后自动重试一次（网络抖动不应永久放弃好音色）。 */
+let onlineVoiceBrokenUntil = 0;
+
+function refreshVoices() { if (window.speechSynthesis) cachedVoices = window.speechSynthesis.getVoices(); }
+
+/** 本地（非在线）中文音色：失败可自动降级的目标。优先大陆普通话，避免误选粤语/国语。 */
+function localZhVoice(): SpeechSynthesisVoice | undefined {
+  const zh = cachedVoices.filter(v => /^zh|cmn/i.test(v.lang) && !/natural|online/i.test(v.name));
+  const cn = zh.filter(v => v.lang.replace('_', '-').toLowerCase() === 'zh-cn');
+  return cn.find(v => /google/i.test(v.name)) || cn[0] || zh[0];
+}
+
+/** 中文音色优选：优先大陆普通话（zh-CN）的在线神经音色（晓晓/云希），杜绝误选粤语（zh-HK）；
+ *  在线音色失败（网络受限）后自动退回本地音色。 */
+function pickZhVoice(): SpeechSynthesisVoice | undefined {
+  if (!cachedVoices.length && typeof window !== 'undefined' && window.speechSynthesis) refreshVoices();   // 懒加载兜底：音色列表异步就绪前被调用
+  const all = cachedVoices.filter(v => /^zh|cmn/i.test(v.lang));
+  if (!all.length) return undefined;
+  const mainland = all.filter(v => v.lang.replace('_', '-').toLowerCase() === 'zh-cn');
+  const pool = mainland.length ? mainland : all;
+  if (Date.now() >= onlineVoiceBrokenUntil) {
+    const nat = pool.find(v => /natural|online/i.test(v.name))
+      || pool.find(v => /xiaoxiao|晓晓|云希|云扬/i.test(v.name));
+    if (nat) return nat;
+  }
+  const local = pool.filter(v => !/natural|online/i.test(v.name));
+  return local.find(v => /google/i.test(v.name)) || local[0] || all[0];
+}
+
+/** 当前优选音色名（诊断用：教室里无声/音色异常时先看这个）。 */
+export function zhVoiceName(): string {
+  return pickZhVoice()?.name ?? '（系统默认音色）';
+}
+
 /** TTS 简短播报：浏览器 speechSynthesis，免 key；仅用于确认类短句。返回预计时长毫秒（供调用方暂停语音识别防回听）。 */
 export function speak(text: string): number {
   try {
@@ -126,8 +169,24 @@ export function speak(text: string): number {
     synth.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
-    utterance.rate = 1.05;
+    const voice = pickZhVoice();
+    const online = voice && /natural|online/i.test(voice.name);
+    if (voice) utterance.voice = voice;
+    // 在线神经音色语流自然可稍快；经典合成音色略放慢。
+    utterance.rate = online ? 1.1 : 1.0;
+    // 在线音色报错（网络受限/服务不可达）→ 降级本地音色重播同一句；90 秒后自动重试在线音色。
+    utterance.onerror = () => {
+      if (online && Date.now() >= onlineVoiceBrokenUntil) {
+        onlineVoiceBrokenUntil = Date.now() + 90_000;
+        const local = localZhVoice();
+        if (local) {
+          const retry = new SpeechSynthesisUtterance(text);
+          retry.voice = local; retry.lang = 'zh-CN'; retry.rate = 1.0;
+          synth.speak(retry);
+        }
+      }
+    };
     synth.speak(utterance);
-    return Math.max(1500, text.length * 220);
+    return Math.max(1500, text.length * (online ? 200 : 220));
   } catch { return 0; /* 无语音合成环境时静默 */ }
 }

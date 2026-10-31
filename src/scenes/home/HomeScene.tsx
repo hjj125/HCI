@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
 import { subjects, experiments } from '../registry';
+import { speak, zhVoiceName } from '../../core/services';
 import { BrandMark } from '../../ui/brand';
 import { IconArrow, IconBook, IconClose, IconCube, IconHand, IconSearch, IconShield } from '../../ui/icons';
 
@@ -95,6 +96,9 @@ export function HomeScene({ active, query = '', subject = '全部', onQuery = ()
         <div className="hero-actions">
           <button className="primary" onClick={() => expRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>开始探索 →</button>
           <button className="ghost" onClick={onGuide}>▶ 了解交互方式</button>
+          <button className="ghost" title={`当前优选音色：${zhVoiceName()}；点击播放自检语句`} onClick={() => {
+            speak('语音自检：如果你能听到这句话，说明语音合成正常。');
+          }}>🔊 语音自检</button>
         </div>
       </div>
       <div className="hero-visual" aria-hidden="true">
