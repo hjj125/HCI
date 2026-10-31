@@ -97,3 +97,35 @@ export function isomerDifferent(atomsA: Atom[], bondsA: Bond[], atomsB: Atom[], 
   const sb = [...signatures(atomsB, bondsB)].sort();
   return sa.some((v, i) => v !== sb[i]);
 }
+
+/** 已达满价的原子 id 列表（剩余键位为 0；超价中态也算"已到头"）。 */
+export function fullValenceIds(atoms: Atom[], bonds: Bond[]): number[] {
+  const used = usedValenceMap(bonds);
+  return atoms.filter(a => (used.get(a.id) ?? 0) >= VALENCE[a.el]).map(a => a.id);
+}
+
+function usedValenceMap(bonds: Bond[]): Map<number, number> {
+  const used = new Map<number, number>();
+  for (const b of bonds) {
+    used.set(b.a, (used.get(b.a) ?? 0) + b.order);
+    used.set(b.b, (used.get(b.b) ?? 0) + b.order);
+  }
+  return used;
+}
+
+/** 剩余键位提示（②面板与灵犀 LLM 上下文用）：全部满价 / 还有空余键位的原子清单。 */
+export function freeValenceHint(atoms: Atom[], bonds: Bond[]): string {
+  if (!atoms.length) return '画布为空。';
+  const used = usedValenceMap(bonds);
+  const free = atoms
+    .map(a => ({ a, n: Math.max(0, VALENCE[a.el] - (used.get(a.id) ?? 0)) }))
+    .filter(x => x.n > 0);
+  if (!free.length) return '全部原子的价键都已用满——不能再连新的键了。';
+  return `还有空余键位：${free.slice(0, 4).map(x => `${ELEMENT_ZH[x.a.el]}#${x.a.id} 余 ${x.n}`).join('、')}${free.length > 4 ? ' 等' : ''}。`;
+}
+
+/** 常见分子的中文名（化学式→名；C2H6O 有乙醇/二甲醚两解，故意不收录）。 */
+export const NAME_ZH: Record<string, string> = {
+  H2O: '水', H2O2: '过氧化氢', O2: '氧气', CO2: '二氧化碳', NH3: '氨', CH4: '甲烷',
+  CH2O: '甲醛', CH4O: '甲醇', C4H10: '丁烷',
+};

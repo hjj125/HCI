@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
-import { speak, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
+import { speak, useSceneAgent, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
+import { sleep } from '../../core/agent/scheduler';
 import { SwipeDetector } from '../slides/pptGesture';
 import { PotteryView, type PotteryHandle } from './PotteryView';
+import { fixProfileToward } from './shapeFix';
 import {
   BASE_CLAY, classifyShape, clipProfile, coverageRatio, defaultProfile, pinchProfile, potMetrics, scaleRadius,
   smoothProfile, stretchProfile, strokeSegments, symmetricStamps,
@@ -166,6 +168,31 @@ export function PotteryScene({ active }: SceneProps) {
     if (ctx) setCoverage(coverageRatio(ctx.getImageData(0, 0, TEX_W, TEX_H).data, BASE_CLAY));
   };
 
+  // 灵犀适配器：修坯（fix-shape）——检测到任务 B 造型不达标时，从当前轮廓向目标轮廓插值动画。
+  const fixCancel = useRef(false);
+  const runShapeFix = async () => {
+    if (bTarget.check(metrics)) { notify('当前造型已经达标——不用修。'); return; }
+    fixCancel.current = false;
+    const kind = bTarget.zh.includes('瓶') ? 'taller-thinner' as const : 'flatter-wider' as const;
+    const from = profile;
+    const to = fixProfileToward(from, kind, bTarget.check);
+    const steps = 24;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      setProfile(from.map((p, k) => ({ y: p.y + (to[k].y - p.y) * t, r: p.r + (to[k].r - p.r) * t })));
+      await sleep(60); if (fixCancel.current) return;
+    }
+    setProfile(to);
+    const m = potMetrics(to);
+    notify(bTarget.check(m)
+      ? `修好了！「${bTarget.zh}」达成——长宽比 ${m.aspect.toFixed(2)}。摸摸看器壁的变化。`
+      : `修到接近了（长宽比 ${m.aspect.toFixed(2)}）——剩下的微妙手感留给你，双手捏合继续调。`);
+  };
+  useSceneAgent('art-pottery', {
+    run: async script => { if (script === 'fix-shape') await runShapeFix(); },
+    cancel: () => { fixCancel.current = true; },
+  });
+
   // 手势与鼠标：拉坯（双层）与彩绘统一入口。
   const anchors = useRef<{ d0: number; y0: number; profile: Profile } | null>(null);
   const pinchLastX = useRef<number | null>(null);
@@ -262,6 +289,7 @@ export function PotteryScene({ active }: SceneProps) {
     if (t.includes('压缩') || t.includes('变矮')) return act('压缩', () => setProfile(p => smoothProfile(stretchProfile(p, 0.89), 1)));
     if (t.includes('变胖') || t.includes('变粗')) return act('变胖', () => setProfile(p => smoothProfile(scaleRadius(p, 1.12), 1)));
     if (t.includes('变瘦') || t.includes('变细')) return act('变瘦', () => setProfile(p => smoothProfile(scaleRadius(p, 0.89), 1)));
+    if (t.includes('修坯') || t.includes('帮我修')) { notify('语音 · 灵犀修坯'); void runShapeFix(); return true; }
     if (t.includes('清除彩绘')) return act('清除彩绘', clearPaint);
     if (t.includes('彩绘') || t.includes('上釉')) { setMode('paint'); return act('切换到彩绘', () => { }); }
     if (t.includes('拉坯') || t.includes('塑形')) { setMode('throw'); return act('切换到拉坯', () => { }); }

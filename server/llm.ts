@@ -68,6 +68,11 @@ export async function askCapital(region: string, apiKey: string): Promise<{ capi
 
 /** 调用 DeepSeek 并以异步迭代器逐段产出增量文本（可注入替换以便测试）。 */
 export async function* callDeepSeekStream(region: string, continent: string, messages: ChatMessage[], apiKey: string): AsyncGenerator<string> {
+  yield* callAgentStream(systemPrompt(region, continent), messages.map(m => ({ role: m.role, content: m.content })), apiKey, { temperature: 0.7, maxTokens: 700 });
+}
+
+/** 通用 DeepSeek 流式调用：system + messages（地理讲解与灵犀智能体共用底层；可注入替换以便测试）。 */
+export async function* callAgentStream(system: string, messages: ChatMessage[], apiKey: string, opts: { temperature?: number; maxTokens?: number } = {}): AsyncGenerator<string> {
   const baseUrl = readEnv('DEEPSEEK_BASE_URL') ?? 'https://api.deepseek.com';
   const model = readEnv('DEEPSEEK_MODEL') ?? 'deepseek-chat';
   const res = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', {
@@ -77,10 +82,10 @@ export async function* callDeepSeekStream(region: string, continent: string, mes
       model,
       stream: true,
       messages: [
-        { role: 'system', content: systemPrompt(region, continent) },
+        { role: 'system', content: system },
         ...messages.map(m => ({ role: m.role, content: m.content.slice(0, 1000) })),
       ],
-      temperature: 0.7, max_tokens: 700,
+      temperature: opts.temperature ?? 0.7, max_tokens: opts.maxTokens ?? 700,
     }),
     signal: AbortSignal.timeout(60000),
   });
@@ -107,9 +112,47 @@ export async function* callDeepSeekStream(region: string, continent: string, mes
   }
 }
 
+/** 灵犀默认参数：短回复、低 token（面向面板气泡）。 */
+export async function* callLingXiStream(system: string, messages: ChatMessage[], apiKey: string): AsyncGenerator<string> {
+  yield* callAgentStream(system, messages, apiKey, { temperature: 0.7, maxTokens: 300 });
+}
+
+/** 灵犀（具身教学智能体）人设：narrate=把规则计划的事实改写成口语引导；ask=回答学生自由提问。 */
+export function agentSystemPrompt(mode: string, sceneTitle: string): string {
+  if (mode === 'narrate') return '你是课堂里的具身教学智能体「灵犀」。基于给定的实验状态快照与最近操作，用中文口语写 1–2 句引导（总共不超过 60 字），面向中学生，亲切自然，结尾可带一个简短的探究性问题。只能使用给定事实，不要编造数据；不要使用 Markdown。';
+  return `你是中学课堂的 AI 教学智能体「灵犀」，正在指导学生做「${sceneTitle}」实验。结合给定的实验状态与最近操作回答学生提问：口语化、不超过 150 字、面向中学生；先肯定学生的尝试，再给方向性引导（不要直接给出完整答案），结尾提一个探究性问题。不要使用 Markdown。`;
+}
+
+type AgentEventLine = { source?: unknown; intent?: unknown; phase?: unknown; value?: unknown };
+type AgentBody = {
+  scene: string; sceneTitle: string; mode: 'narrate' | 'ask';
+  snapshot: Record<string, unknown>;
+  events: AgentEventLine[];
+  question?: string;
+  history?: ChatMessage[];
+};
+
+/** 灵犀请求的上下文块：只有快照元数据、语义事件与提问文本（不含摄像头画面与音频）。 */
+export function agentUserContent(b: AgentBody): string {
+  const events = b.events.slice(-12)
+    .map(e => `${String(e.source ?? '?')}·${String(e.intent ?? '?')}${e.value ? `[${String(e.value).slice(0, 24)}]` : ''}`)
+    .join('，');
+  return [
+    `实验：${b.sceneTitle}（${b.scene}）`,
+    `状态快照：${JSON.stringify(b.snapshot ?? {}).slice(0, 1800)}`,
+    events ? `最近操作：${events}` : '',
+    b.question ? `学生提问：${b.question}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 export function createLlmMiddleware(
   stream: (region: string, continent: string, messages: ChatMessage[], apiKey: string) => AsyncGenerator<string> = callDeepSeekStream,
-  options: { apiKey?: string; askCapital?: (region: string, apiKey: string) => Promise<{ capital: string; lat: number; lon: number } | null> } = {},
+  options: {
+    apiKey?: string;
+    askCapital?: (region: string, apiKey: string) => Promise<{ capital: string; lat: number; lon: number } | null>;
+    /** 灵犀流（可注入替换以便测试）。 */
+    agentStream?: (system: string, messages: ChatMessage[], apiKey: string) => AsyncGenerator<string>;
+  } = {},
 ): Connect.NextHandleFunction {
   let lastCall = 0, dailyCount = 0, dailyReset = new Date().toDateString();
   return async (req, res) => {
@@ -127,8 +170,8 @@ export function createLlmMiddleware(
     }
     const url = new URL(req.url ?? '/', 'http://localhost');
     // 兼容挂载时已剥前缀（/chat）与全路径（/api/llm/chat）两种形式。
-    // /chat：流式讲解；/capital：一次性首都坐标查询（同一限流与额度）。
-    if (req.method !== 'POST' || (!url.pathname.endsWith('/chat') && !url.pathname.endsWith('/capital'))) { send(400, { error: '无效的 AI 请求。' }); return; }
+    // /chat：流式讲解；/capital：一次性首都坐标查询；/agent：灵犀教学智能体（同一限流与额度）。
+    if (req.method !== 'POST' || (!url.pathname.endsWith('/chat') && !url.pathname.endsWith('/capital') && !url.pathname.endsWith('/agent'))) { send(400, { error: '无效的 AI 请求。' }); return; }
     const apiKey = readEnv('DEEPSEEK_API_KEY');
     const askCap = options.askCapital ?? askCapital;
     if (!apiKey) { send(503, { configured: false, error: 'AI 讲解未配置：请在项目根目录 .env 填入 DEEPSEEK_API_KEY 并重启服务（见 README）。' }); return; }
@@ -136,19 +179,36 @@ export function createLlmMiddleware(
     const today = new Date().toDateString();
     if (today !== dailyReset) { dailyReset = today; dailyCount = 0; }
     if (dailyCount >= 300) { send(429, { error: '今日 AI 额度已用完（300 次/天）。' }); return; }
-    // 读取请求体：区域 + 对话历史（最多保留最近 10 条，防止滥用）。
+    // 读取请求体：/agent 为场景上下文（快照+事件+提问）；其余为区域 + 对话历史（最多 10 条，防滥用）。
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
+    const isAgent = url.pathname.endsWith('/agent');
     let region = '', continent = '该大洲'; let messages: ChatMessage[] = [];
+    let agentBody: AgentBody | null = null;
     try {
       const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      region = String(parsed.region ?? '').slice(0, 80);
-      continent = String(parsed.continent ?? '该大洲').slice(0, 40);
-      if (Array.isArray(parsed.messages)) messages = parsed.messages.slice(-10);
+      if (isAgent) {
+        agentBody = {
+          scene: String(parsed.scene ?? '').slice(0, 40),
+          sceneTitle: String(parsed.sceneTitle ?? '').slice(0, 40) || '课堂实验',
+          mode: parsed.mode === 'narrate' ? 'narrate' : 'ask',
+          snapshot: parsed.snapshot && typeof parsed.snapshot === 'object' && !Array.isArray(parsed.snapshot) ? parsed.snapshot : {},
+          events: Array.isArray(parsed.events) ? parsed.events.slice(-12) : [],
+          question: parsed.question ? String(parsed.question).slice(0, 500) : undefined,
+          history: Array.isArray(parsed.history) ? parsed.history.slice(-10) : [],
+        };
+      } else {
+        region = String(parsed.region ?? '').slice(0, 80);
+        continent = String(parsed.continent ?? '该大洲').slice(0, 40);
+        if (Array.isArray(parsed.messages)) messages = parsed.messages.slice(-10);
+      }
     } catch { /* 保持默认 */ }
-    if (!region) { send(400, { error: '缺少区域名称。' }); return; }
-    if (!url.pathname.endsWith('/capital')) {
-      if (messages.length === 0) { send(400, { error: '缺少提问内容。' }); return; }
+    if (isAgent) {
+      if (!agentBody?.scene) { send(400, { error: '缺少场景标识。' }); return; }
+      if (agentBody.mode === 'ask' && !agentBody.question) { send(400, { error: '缺少提问内容。' }); return; }
+    } else {
+      if (!region) { send(400, { error: '缺少区域名称。' }); return; }
+      if (url.pathname.endsWith('/chat') && messages.length === 0) { send(400, { error: '缺少提问内容。' }); return; }
     }
     lastCall = Date.now(); dailyCount++;
     // /capital：一次性 JSON 返回首都坐标（DeepSeek 兜底，内置表/缓存在前端）。
@@ -160,13 +220,18 @@ export function createLlmMiddleware(
       } catch { send(502, { error: 'AI 首都查询异常。' }); }
       return;
     }
-    // SSE 流式响应：逐段转发增量文本。
+    // SSE 流式响应：逐段转发增量文本（灵犀走 agentStream，地理讲解走 stream）。
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Accel-Buffering', 'no');
     res.statusCode = 200;
+    const agentFn = options.agentStream ?? callLingXiStream;
+    const upstream = agentBody
+      ? agentFn(agentSystemPrompt(agentBody.mode, agentBody.sceneTitle),
+        [...(agentBody.history ?? []), { role: 'user', content: agentUserContent(agentBody) }], apiKey)
+      : stream(region, continent, messages, apiKey);
     try {
-      for await (const delta of stream(region, continent, messages, apiKey)) {
+      for await (const delta of upstream) {
         res.write(`data: ${JSON.stringify({ delta })}\n\n`);
       }
       res.write('data: [DONE]\n\n');

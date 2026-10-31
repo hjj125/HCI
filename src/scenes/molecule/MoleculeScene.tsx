@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
-import { speak, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
+import { speak, useSceneAgent, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
+import { sleep } from '../../core/agent/scheduler';
 import { MoleculeView, type MoleculeHandle } from './MoleculeView';
+import { MOLECULE_DEMOS } from './agentAdapter';
+import { goalFromSpec, planBuild, predictState, type BuildAction } from './buildPlanner';
+import { geometryLabels, vseprLayout } from './vsepr';
 import {
-  bondKey, isomerDifferent, molecularFormula, validateMolecule, ELEMENT_ZH,
+  bondKey, freeValenceHint, fullValenceIds, isomerDifferent, molecularFormula, validateMolecule,
+  ELEMENT_ZH, NAME_ZH, VALENCE,
   type Atom, type Bond, type Element,
 } from './molecule';
 
@@ -51,6 +56,14 @@ export function MoleculeScene({ active }: SceneProps) {
   const formula = useMemo(() => molecularFormula(atoms), [atoms]);
   const bSatisfied = atoms.length > 0 && validation.ok && formula === bTarget.formula;
   const cSatisfied = savedC.length === 2 && isomerDifferent(savedC[0].atoms, savedC[0].bonds, savedC[1].atoms, savedC[1].bonds);
+  // VSEPR 理想几何：targets 为理想坐标（null = 自由摆放走弹簧物理）；fullIds 为满价原子（灰调）。
+  const [geoMode, setGeoMode] = useState<'vsepr' | 'free'>('vsepr');
+  const targets = useMemo(() => (geoMode === 'vsepr' ? vseprLayout(atoms, bonds) : null), [geoMode, atoms, bonds]);
+  const fullIds = useMemo(() => new Set(fullValenceIds(atoms, bonds)), [atoms, bonds]);
+  const geoLines = useMemo(
+    () => geometryLabels(atoms, bonds).map(({ id, el, info }) => `${ELEMENT_ZH[el]}#${id}：${info.zh}${info.angle != null ? `，键角约 ${info.angle}°` : ''}`),
+    [atoms, bonds],
+  );
 
   const emit = (intent: Parameters<typeof bus.emit>[0]['intent'], value?: string, source: Parameters<typeof bus.emit>[0]['source'] = 'mouse') =>
     bus.emit({ scene: 'chem-molecule', source, intent, phase: 'end', value });
@@ -67,6 +80,204 @@ export function MoleculeScene({ active }: SceneProps) {
     notify('已删除选中的原子及其键。');
   };
   const clearAll = () => { setAtoms([]); setBonds([]); setSelected(null); notify('画布已清空。'); };
+
+  // 灵犀演示：按脚本数据逐个添加原子、逐对成键（不经过点选 UI，用 updater 读最新状态）。
+  const agentBond = (a: number, b: number, order: 1 | 2) => {
+    setBonds(v => {
+      const key = bondKey(a, b);
+      const existing = v.find(x => bondKey(x.a, x.b) === key);
+      if (existing && existing.order === order) return v;
+      if (existing) return v.map(x => (bondKey(x.a, x.b) === key ? { ...x, order } : x));
+      return [...v, { a: Math.min(a, b), b: Math.max(a, b), order }];
+    });
+  };
+  const demoCancel = useRef(false);
+  // 学生插手的时间戳（软打断）：闭环搭建器等安静 1.2 秒后重新感知、自适应继续。
+  const disturbRef = useRef(0);
+  // 每渲染刷新的画布快照——闭环搭建器的"眼睛"。
+  const molRef = useRef({ atoms, bonds });
+  molRef.current = { atoms, bonds };
+
+  // 指向：把出事原子选中——高亮 + 键数徽标（"键 5/4（超价！）"）+ 手指点过去，就是灵犀的身体指示。
+  const highlightError = () => {
+    const err = validation.errors[0];
+    if (err?.atoms.length) {
+      setSelected(err.atoms[0]);
+      view.current?.handShow(true);
+      view.current?.handToAtom(err.atoms[0]);
+      setTimeout(() => view.current?.handShow(false), 1800);
+      notify(`灵犀帮你指出来了：${err.detail}`);
+    }
+  };
+
+  // 就地修复：不重搭，在学生的分子上动手——优先拆一个多余的末端氢，其次降双键为单键。
+  // 行动前用世界模型预测结果，行动后核对："预测-行动-观察"，和任务卡教学生的方法论一致。
+  const repairOvervalence = async (voice: (text: string) => void = notify) => {
+    const err = validation.errors.find(e => e.kind === 'overvalence');
+    if (!err) { voice('现在没有超价的原子——没什么要修的。'); return; }
+    demoCancel.current = false;
+    await sleep(350); if (demoCancel.current) return;
+    const u = err.atoms[0];
+    const atom = atoms.find(a => a.id === u);
+    if (!atom) { voice('出错的原子已经不在画布上了。'); return; }
+    const atomZh = ELEMENT_ZH[atom.el];
+    const touching = bonds.filter(b => b.a === u || b.b === u);
+    const usedNow = touching.reduce((s, b) => s + b.order, 0);
+    const extraH = [...touching].reverse().find(b => {
+      if (b.order !== 1) return false;
+      const other = b.a === u ? b.b : b.a;
+      const neighbor = atoms.find(a => a.id === other);
+      const deg = bonds.filter(x => x.a === other || x.b === other).reduce((s, x) => s + x.order, 0);
+      return neighbor?.el === 'H' && deg === 1;
+    });
+    view.current?.handShow(true);
+    if (extraH) {
+      const hid = extraH.a === u ? extraH.b : extraH.a;
+      const pred = predictState(atoms, bonds, { kind: 'remove', id: hid });
+      voice(`灵犀先预测：拆掉 #${hid} 后，${atomZh}#${u} 键数 ${usedNow} → ${usedNow - 1}，分子${pred.valid ? '仍然合法' : '可能还有别的问题'}——看好了。`);
+      view.current?.handToAtom(hid);
+      await sleep(420); if (demoCancel.current) { view.current?.handShow(false); return; }
+      view.current?.handPinch(true);
+      await sleep(180); if (demoCancel.current) { view.current?.handShow(false); return; }
+      setAtoms(v => v.filter(a => a.id !== hid));
+      setBonds(v => v.filter(b => b !== extraH));
+      setSelected(u);
+      await sleep(160);
+      view.current?.handPinch(false);
+      await sleep(600); if (demoCancel.current) { view.current?.handShow(false); return; }
+      const usedAfter = molRef.current.bonds.filter(b => b.a === u || b.b === u).reduce((s, b) => s + b.order, 0);
+      voice(`${usedAfter === usedNow - 1 ? '预测应验了' : '实际和预测有出入——看②面板重新判一判'}：键数 ${usedNow} → ${usedAfter}。想一想：为什么拆氢而不是拆碳？可以打字告诉灵犀。`);
+    } else {
+      const dbl = [...touching].reverse().find(b => b.order === 2);
+      if (dbl) {
+        voice(`没有多余的氢可拆——灵犀预测：把一根双键降为单键，${atomZh}#${u} 键数 ${usedNow} → ${usedNow - 1}。`);
+        view.current?.handToAtom(u);
+        await sleep(380); if (demoCancel.current) { view.current?.handShow(false); return; }
+        view.current?.handPinch(true);
+        await sleep(180); if (demoCancel.current) { view.current?.handShow(false); return; }
+        setBonds(v => v.map(b => (b === dbl ? { ...b, order: 1 as const } : b)));
+        setSelected(u);
+        await sleep(160);
+        view.current?.handPinch(false);
+        await sleep(600); if (demoCancel.current) { view.current?.handShow(false); return; }
+        voice(`修好了：键数 ${usedNow} → ${usedNow - 1}。想一想：什么时候该降键级、什么时候该拆原子？`);
+      } else {
+        voice('这个超价没法只靠拆键修复——试试清空后按价数重新搭，或者直接问灵犀为什么。');
+      }
+    }
+    view.current?.handShow(false);
+  };
+
+  useSceneAgent('chem-molecule', {
+    run: async (script, param, say) => {
+      const voice = say ?? notify; // 灵犀的声音：气泡打字机 + TTS；缺省回退顶部通知
+      if (script === 'highlight-error') highlightError();
+      else if (script === 'repair-overvalence') await repairOvervalence(voice);
+      else if (script === 'demo-springback') await runSpringback(voice);
+      else await runBuildLoop(script, voice);
+    },
+    disturb: () => { disturbRef.current = Date.now(); },
+    cancel: () => { demoCancel.current = true; },
+  });
+
+  // 手的动作编排：每个动作都"手先到 → 捏合 → 执行"——身体可见。
+  const performAction = async (act: BuildAction) => {
+    if (act.kind === 'add') {
+      view.current?.handToFree();
+      view.current?.handPinch(true);
+      await sleep(240); if (demoCancel.current) return;
+      addAtom(act.el);
+      await sleep(160);
+      view.current?.handPinch(false);
+    } else if (act.kind === 'remove') {
+      view.current?.handToAtom(act.id);
+      await sleep(240); if (demoCancel.current) return;
+      view.current?.handPinch(true);
+      await sleep(150);
+      setAtoms(v => v.filter(a => a.id !== act.id));
+      setBonds(v => v.filter(b => b.a !== act.id && b.b !== act.id));
+      await sleep(140);
+      view.current?.handPinch(false);
+    } else {
+      view.current?.handToAtom(act.a);
+      await sleep(220); if (demoCancel.current) return;
+      view.current?.handPinch(true);
+      view.current?.handToAtom(act.b);
+      await sleep(280); if (demoCancel.current) return;
+      agentBond(act.a, act.b, act.order);
+      await sleep(150);
+      view.current?.handPinch(false);
+    }
+  };
+
+  /**
+   * 闭环搭建器：感知（molRef 最新原子/键）→ 规划（planBuild 求差）→ 预测（世界模型 = 判题内核）
+   * → 手到位执行 → 复核（实际 vs 预测，不符就解释并在下一轮重规划）→ 达成后收尾 + 苏格拉底反问。
+   * 学生插手（disturb）不取消演示：等安静 1.2 秒后重新感知、自适应继续；清空画布则优雅收场。
+   */
+  const runBuildLoop = async (script: string, voice: (text: string) => void = notify) => {
+    const spec = MOLECULE_DEMOS[script];
+    if (!spec) return;
+    demoCancel.current = false;
+    disturbRef.current = 0;
+    view.current?.handShow(true);
+    view.current?.handToFree();
+    clearAll();
+    await sleep(480); if (demoCancel.current) { view.current?.handShow(false); return; }
+    const goal = goalFromSpec(spec);
+    let seenDisturb = 0;
+    for (let guard = 0; guard < 220; guard++) {
+      if (disturbRef.current && Date.now() - disturbRef.current < 1200) { await sleep(180); continue; }
+      if (disturbRef.current !== seenDisturb) {
+        seenDisturb = disturbRef.current;
+        if (!molRef.current.atoms.length) {
+          voice('好，画布空了——想再看一遍就说"搭一个"分子名。');
+          view.current?.handShow(false);
+          return;
+        }
+        voice('灵犀注意到你动了画布——重新看一眼，接着搭。');
+      }
+      const { atoms: curAtoms, bonds: curBonds } = molRef.current;
+      const actions = planBuild(goal, curAtoms, curBonds);
+      if (!actions.length) break;
+      const act = actions[0];
+      const pred = predictState(curAtoms, curBonds, act);
+      await performAction(act);
+      if (demoCancel.current) { view.current?.handShow(false); return; }
+      await sleep(320);
+      if (demoCancel.current) { view.current?.handShow(false); return; }
+      if (pred.formula !== molecularFormula(molRef.current.atoms)) {
+        voice('和你动手的时候撞上了——没关系，灵犀重新看一眼，接着搭。');
+      }
+    }
+    view.current?.handShow(false);
+    const f = molecularFormula(molRef.current.atoms);
+    const ok = validateMolecule(molRef.current.atoms, molRef.current.bonds).ok;
+    voice(ok
+      ? `搭好了：${f}${NAME_ZH[f] ? `（${NAME_ZH[f]}）` : ''}。${spec.summary}${spec.quiz ? ` 想一想：${spec.quiz}` : ''}`
+      : `这一轮搭到接近了——当前是 ${f}。哪里不对，可以问灵犀，或者说"再来一遍"。`);
+  };
+
+  /** 推氢回弹：把一个末端氢拖离理想位、松手——理想几何缓动把它弹回 VSEPR 的位置。 */
+  const runSpringback = async (voice: (text: string) => void = notify) => {
+    if (geoMode !== 'vsepr') { voice('推氢回弹要在「理想 VSEPR」几何下看——先在工具栏切过去。'); return; }
+    const target = molRef.current.atoms.find(a => a.el === 'H'
+      && molRef.current.bonds.filter(b => b.a === a.id || b.b === a.id).reduce((s, b) => s + b.order, 0) === 1);
+    if (!target) { voice('画布上还没有带氢的分子——先搭一个再试。'); return; }
+    demoCancel.current = false;
+    view.current?.handShow(true);
+    view.current?.handToAtom(target.id);
+    await sleep(420); if (demoCancel.current) { view.current?.handShow(false); return; }
+    view.current?.handPinch(true);
+    await sleep(220); if (demoCancel.current) { view.current?.handShow(false); return; }
+    view.current?.nudgeAtom(target.id);
+    await sleep(760);
+    view.current?.handPinch(false);
+    await sleep(950);
+    view.current?.handShow(false);
+    if (demoCancel.current) return;
+    voice('看——松手后它弹回了理想位置。几何不是灵犀规定的，是 VSEPR 这个"环境的约束"。');
+  };
 
   /** 点选语义：第一个=选中；第二个 → 无键成键、单键升双键、双键断开。 */
   const handleAtomClick = (id: number) => {
@@ -98,7 +309,7 @@ export function MoleculeScene({ active }: SceneProps) {
     view.current?.pointer(sample.phase, nx, ny);
   });
 
-  // 场景级语音：添加元素 / 删除选中 / 清除重来。
+  // 场景级语音：添加元素 / 删除选中 / 清除重来 / 语音直通灵犀演示（"搭一个水分子""演示甲烷"）。
   const lastVoice = useRef({ text: '', at: 0 });
   useSceneVoicePolicy('chem-molecule', text => {
     const t = text.replace(/\s/g, '');
@@ -115,6 +326,19 @@ export function MoleculeScene({ active }: SceneProps) {
       }
       return true;
     }
+    if (t.includes('搭') || t.includes('演示')) {
+      const demo = ([['水', 'demo-water'], ['氧气', 'demo-oxygen'], ['二氧化碳', 'demo-co2'], ['氨', 'demo-ammonia'], ['甲烷', 'demo-methane']] as const)
+        .find(([w]) => t.includes(w));
+      if (demo) {
+        const msg = `好——看灵犀搭${demo[0] === '水' ? '一个水分子' : demo[0]}。`;
+        notify(msg);
+        const ms = speak(msg);
+        if (ms) pauseRecognition(ms + 800);
+        void runBuildLoop(demo[1]);
+        return true;
+      }
+    }
+    if (t.includes('推')) { notify('语音 · 灵犀推氢回弹'); void runSpringback(); return true; }
     if (t.includes('删除')) { removeSelected(); return true; }
     if (t.includes('清除') || t.includes('重来')) { clearAll(); return true; }
     return false;
@@ -144,8 +368,10 @@ export function MoleculeScene({ active }: SceneProps) {
 
   useSceneSnapshot('chem-molecule', () => ({
     startedAt: new Date(startedAt).toISOString(), durationSeconds: Math.round((Date.now() - startedAt) / 1000),
-    task, atomCount: atoms.length, bondCount: bonds.length,
-    formula, valid: validation.ok, errors: validation.errors.map(e => e.detail),
+    task, geoMode,
+    atomCount: atoms.length, bondCount: bonds.length,
+    formula, nameZh: NAME_ZH[formula] ?? null, valid: validation.ok, errors: validation.errors.map(e => e.detail),
+    valenceHint: freeValenceHint(atoms, bonds),
     hints: hint, explanation, completed,
     quiz: task === 'A' ? { element: aQuiz.el, prediction: pred || null, correct: verdictA } : null,
     construct: task === 'B' ? { target: bTarget.formula, satisfied: bSatisfied } : null,
@@ -178,7 +404,9 @@ export function MoleculeScene({ active }: SceneProps) {
       {ELEMENTS.map(el => <button key={el} onClick={() => addAtom(el)}>添加{ELEMENT_ZH[el]}</button>)}
       <button onClick={removeSelected}>删除选中</button>
       <button onClick={clearAll}>清空画布</button>
-      <span className="help">点选两个原子=成键；已键合再点=升双键；再点=断键。语音可说“添加氧”“删除”“清除”。</span>
+      <button onClick={() => setGeoMode(m => (m === 'vsepr' ? 'free' : 'vsepr'))}
+        title="理想 VSEPR：原子回到价层电子对互斥模型的理想位置（拖动后松手会弹回）；自由摆放保留弹簧布局，可随意摆姿势。">几何：{geoMode === 'vsepr' ? '理想 VSEPR' : '自由摆放'}</button>
+      <span className="help">点选两个原子=成键；已键合再点=升双键；再点=断键。语音可说“添加氧”“删除”“清除”“搭一个水分子”。</span>
     </div>
     <div className="geo-host" ref={host} role="img" aria-label="分子画布"
       onPointerDown={e => { const r = e.currentTarget.getBoundingClientRect(); view.current?.pointer('start', (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); }}
@@ -186,7 +414,7 @@ export function MoleculeScene({ active }: SceneProps) {
       onPointerUp={e => { const r = e.currentTarget.getBoundingClientRect(); view.current?.pointer('end', (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); }}
       onPointerCancel={() => view.current?.pointer('cancel', 0, 0)}
       onWheel={e => { e.preventDefault(); view.current?.zoom(e.deltaY > 0 ? 0.2 : -0.2); }}>
-      <MoleculeView hostRef={host} ref={view} atoms={atoms} bonds={bonds} selectedId={selected} onAtomClick={handleAtomClick} />
+      <MoleculeView hostRef={host} ref={view} atoms={atoms} bonds={bonds} selectedId={selected} onAtomClick={handleAtomClick} targets={targets} fullIds={fullIds} />
     </div>
     <aside className="side" style={{ marginTop: 16 }}>
       <div className="panel prediction">
@@ -212,9 +440,12 @@ export function MoleculeScene({ active }: SceneProps) {
       <div className="panel result">
         <h3>② 分子状态</h3>
         <div className="big-number" style={{ fontSize: 30 }}>{formula}</div>
+        {NAME_ZH[formula] && <p className="help">中文名：{NAME_ZH[formula]}</p>}
         {validation.ok
           ? <p className="help">{atoms.length ? '✓ 合法分子：无超价、整体连通。' : '空画布。'}</p>
           : <div>{validation.errors.map((e, i) => <p key={i} className="notice" style={{ marginTop: 8 }}>⚠ {e.detail}</p>)}</div>}
+        <p className="help">{freeValenceHint(atoms, bonds)}</p>
+        {geoLines.length > 0 && <p className="help">中心原子几何（VSEPR 近似）：{geoLines.slice(0, 3).join('；')}{geoLines.length > 3 ? ' 等' : ''}。</p>}
         <p className="help">判题 = 价键规则 + 连通性 + 希尔式（教科书顺序），全部离线确定性计算。</p>
       </div>
       <div className="panel hint">

@@ -95,7 +95,7 @@ export function SlidesScene({ active }: SceneProps) {
                 <div className="cover-eyebrow">EMBODIEDEDU · 灵境智学 · 具身学习多模态交互平台</div>
                 <h1 className="cover-title">让知识，可以被操作</h1>
                 <p className="cover-sub">通过身体动作、可见对象和即时反馈，连接课堂讲解与动手探究。</p>
-                <div className="cover-tags">数学 · 物理 · 化学 · 生物 · 美术 · 语文 · 地理 —— 八大学科 · 十四个动手实验</div>
+                <div className="cover-tags">数学 · 物理 · 化学 · 生物 · 美术 · 语文 · 地理 —— 八大学科 · 十五个动手实验</div>
                 <p className="help">本页为演示封面；导入图片课件可完全替换。手掌左右挥动即可翻页。</p>
               </div>
             : <><h1>{slideTitles[slide]}</h1><p>{slideTexts[slide]}</p></>}

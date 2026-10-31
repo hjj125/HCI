@@ -3,6 +3,7 @@ import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
 import { useScenePolicy, useSceneSnapshot, useSceneSettings, useServices } from '../../core/services';
 import type { HandSample } from '../../core/useHandInput';
+import { stabilizePoint, moved, JITTER_GATE, type Pt } from './stabilize';
 
 type Stroke = { points: { x: number; y: number }[]; color: string; width: number; eraser?: boolean };
 
@@ -15,6 +16,10 @@ export function WhiteboardScene({ active }: SceneProps) {
   const [width, setWidth] = useState(4);
   const canvas = useRef<HTMLCanvasElement>(null);
   const spaceDown = useRef(false), spaceWriting = useRef(false);
+  // 隔空书写稳定器：One Euro 自适应滤波 + 最小点距门限（鼠标路径不经过，无延迟代价）。
+  const penPt = useRef<Pt | null>(null);
+  const penLast = useRef<Pt | null>(null);
+  const penT = useRef(0);
 
   const emitDrag = (phase: 'start' | 'update' | 'end' | 'cancel', position?: { x: number; y: number }, source: 'mouse' | 'hand' | 'keyboard' = 'mouse') =>
     bus.emit({ scene: 'whiteboard', source, intent: 'drag', phase, position });
@@ -41,7 +46,7 @@ export function WhiteboardScene({ active }: SceneProps) {
       notify(sample.command === 'pen' ? '数字手势 · 已切换为画笔，捏合继续书写。' : '数字手势 · 已切换为橡皮，捏合移动即可擦除。');
       return;
     }
-    if (sample.phase === 'cancel') { emitDrag('cancel', undefined, 'hand'); return; }
+    if (sample.phase === 'cancel') { penPt.current = null; penLast.current = null; penT.current = 0; emitDrag('cancel', undefined, 'hand'); return; }
     const px = sample.x * window.innerWidth, py = sample.y * window.innerHeight;
     if (sample.phase === 'start') {
       // 空格落笔产生的 start 未经壳的按钮检查，这里补上：指向按钮时空格起笔仍是点击。
@@ -54,13 +59,24 @@ export function WhiteboardScene({ active }: SceneProps) {
     const rect = canvas.current?.getBoundingClientRect();
     if (sample.phase === 'start') {
       if (rect && px >= rect.left - 12 && px <= rect.right + 12 && py >= rect.top - 20 && py <= rect.bottom + 20) {
-        emitDrag('start', { x: Math.max(0, Math.min(1, (px - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (py - rect.top) / rect.height)) }, 'hand');
+        const start = { x: Math.max(0, Math.min(1, (px - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (py - rect.top) / rect.height)) };
+        penPt.current = null; penLast.current = start; penT.current = 0;   // 起笔直通，滤波从零状态开始
+        emitDrag('start', start, 'hand');
       }
       return;
     }
-    if (drag.current?.scene === 'whiteboard' && sample.phase === 'end') { emitDrag('end', undefined, 'hand'); return; }
+    if (drag.current?.scene === 'whiteboard' && sample.phase === 'end') { penPt.current = null; penLast.current = null; penT.current = 0; emitDrag('end', undefined, 'hand'); return; }
     if (drag.current?.scene === 'whiteboard' && sample.pinching && rect) {
-      emitDrag('update', { x: Math.max(0, Math.min(1, (px - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (py - rect.top) / rect.height)) }, 'hand');
+      const target = { x: Math.max(0, Math.min(1, (px - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (py - rect.top) / rect.height)) };
+      const now = performance.now();
+      const dt = penT.current ? (now - penT.current) / 1000 : 0.024;
+      penT.current = now;
+      const p = stabilizePoint(penPt.current, target, dt);
+      penPt.current = p;
+      if (!penLast.current || moved(penLast.current, p) >= JITTER_GATE) {
+        penLast.current = p;
+        emitDrag('update', p, 'hand');
+      }
     }
   });
 

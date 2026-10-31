@@ -1,6 +1,6 @@
-﻿export type SceneId = 'home' | 'slides' | 'whiteboard' | 'geometry' | 'functions' | 'math-bodyangle' | 'physics' | 'chem-molecule' | 'chinese-recite' | 'bio-motion' | 'art-pottery' | 'geography' | 'geo-daynight' | 'geo-seasons' | 'geo-moonphase';
+﻿export type SceneId = 'home' | 'slides' | 'whiteboard' | 'geometry' | 'functions' | 'math-bodyangle' | 'physics' | 'chem-molecule' | 'chinese-recite' | 'bio-motion' | 'art-pottery' | 'art-bloom' | 'geography' | 'geo-daynight' | 'geo-seasons' | 'geo-moonphase';
 export type InteractionEvent = {
-  scene: SceneId; source: 'mouse' | 'hand' | 'keyboard' | 'voice' | 'system';
+  scene: SceneId; source: 'mouse' | 'hand' | 'keyboard' | 'voice' | 'agent' | 'system';
   intent: 'point' | 'drag' | 'next' | 'previous' | 'undo' | 'reset' | 'switch' | 'predict' | 'hint' | 'submit' | 'laser' | 'run' | 'pause';
   phase: 'start' | 'update' | 'end' | 'cancel';
   position?: { x: number; y: number }; value?: string;
@@ -28,7 +28,7 @@ const VOICE_RULES: readonly (readonly [string, VoiceIntent])[] = [
   ['关闭语音', { intent: 'voice-off' }], ['停止语音', { intent: 'voice-off' }],
   ['下一页', { intent: 'next' }], ['上一页', { intent: 'previous' }],
   ['首页', { intent: 'switch', value: 'home' }],
-  ['白板', { intent: 'switch', value: 'whiteboard' }], ['课件', { intent: 'switch', value: 'slides' }], ['几何', { intent: 'switch', value: 'geometry' }], ['函数', { intent: 'switch', value: 'functions' }], ['量角', { intent: 'switch', value: 'math-bodyangle' }], ['物理', { intent: 'switch', value: 'physics' }], ['分子', { intent: 'switch', value: 'chem-molecule' }], ['背诵', { intent: 'switch', value: 'chinese-recite' }], ['生物', { intent: 'switch', value: 'bio-motion' }], ['陶艺', { intent: 'switch', value: 'art-pottery' }], ['晨昏线', { intent: 'switch', value: 'geo-daynight' }], ['四季', { intent: 'switch', value: 'geo-seasons' }], ['月相', { intent: 'switch', value: 'geo-moonphase' }], ['地球', { intent: 'switch', value: 'geography' }], ['地理', { intent: 'switch', value: 'geography' }],
+  ['白板', { intent: 'switch', value: 'whiteboard' }], ['课件', { intent: 'switch', value: 'slides' }], ['几何', { intent: 'switch', value: 'geometry' }], ['函数', { intent: 'switch', value: 'functions' }], ['量角', { intent: 'switch', value: 'math-bodyangle' }], ['物理', { intent: 'switch', value: 'physics' }], ['分子', { intent: 'switch', value: 'chem-molecule' }], ['背诵', { intent: 'switch', value: 'chinese-recite' }], ['生物', { intent: 'switch', value: 'bio-motion' }], ['陶艺', { intent: 'switch', value: 'art-pottery' }], ['开花', { intent: 'switch', value: 'art-bloom' }], ['晨昏线', { intent: 'switch', value: 'geo-daynight' }], ['四季', { intent: 'switch', value: 'geo-seasons' }], ['月相', { intent: 'switch', value: 'geo-moonphase' }], ['地球', { intent: 'switch', value: 'geography' }], ['地理', { intent: 'switch', value: 'geography' }],
   ['撤销', { intent: 'undo' }], ['重置', { intent: 'reset' }], ['提示', { intent: 'hint' }], ['激光笔', { intent: 'laser' }],
   ['开始', { intent: 'run' }], ['暂停', { intent: 'pause' }],
 ];

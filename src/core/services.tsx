@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, type ReactNode, type MutableRefObject, type RefObject } from 'react';
 import type { HandSample } from './useHandInput';
 import type { SceneId } from './interaction';
+import type { SceneAgentAdapter } from './agent/types';
 
 /**
  * 平台提供给场景插件的服务契约（对应总体设计方案 6.2 学科插件契约）：
@@ -22,6 +23,8 @@ export type AppServices = {
   /** 姿态策略：激活场景注册后平台启动 PoseLandmarker 并逐帧转交（生物实验用）。 */
   registerPosePolicy: (scene: SceneId, handler: ((sample: PoseSample) => void) | null) => void;
   registerSnapshot: (scene: SceneId, get: (() => Record<string, unknown>) | null) => void;
+  /** 场景注册智能体适配器：登记本场景可被 AI 教学智能体「灵犀」执行的演示脚本。 */
+  registerAgentPolicy: (scene: SceneId, adapter: SceneAgentAdapter | null) => void;
   /** TTS 播报期间暂停语音识别（防喇叭回听造成自激循环），ms 后自动恢复。 */
   pauseRecognition: (ms: number) => void;
   drag: MutableRefObject<DragSession>;
@@ -89,6 +92,20 @@ export function useSceneVoicePolicy(scene: SceneId, handler: (text: string) => b
     registerVoicePolicy(scene, text => latest.current(text));
     return () => registerVoicePolicy(scene, null);
   }, [scene, registerVoicePolicy]);
+}
+
+/** 场景注册智能体适配器：随挂载/卸载自动登记；演示请求始终委托最新闭包（脚本可异步）。 */
+export function useSceneAgent(scene: SceneId, adapter: SceneAgentAdapter) {
+  const { registerAgentPolicy } = useServices();
+  const latest = useRef(adapter); latest.current = adapter;
+  useEffect(() => {
+    registerAgentPolicy(scene, {
+      run: (script, param, say) => latest.current.run(script, param, say),
+      disturb: () => latest.current.disturb?.(),
+      cancel: () => latest.current.cancel(),
+    });
+    return () => registerAgentPolicy(scene, null);
+  }, [scene, registerAgentPolicy]);
 }
 
 /** 场景注册姿态策略：随挂载/卸载自动登记；仅激活场景收到姿态采样。 */

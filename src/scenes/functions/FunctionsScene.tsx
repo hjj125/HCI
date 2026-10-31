@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { bus } from '../../core/interaction';
 import type { SceneProps } from '../types';
-import { speak, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
+import { speak, useSceneAgent, useScenePolicy, useSceneSnapshot, useSceneVoicePolicy, useServices } from '../../core/services';
 import type { HandSample } from '../../core/useHandInput';
 import { classify, evaluate, type FunctionFamily, type FunctionFit, type Sample } from './functionFit';
 import { A_TARGETS, B_TARGETS, formatFit } from './taskLogic';
+import { emitDragStroke, FAMILY_CURVES, sampleCurve } from './agentAdapter';
 
 type Task = 'free' | 'A' | 'B' | 'C';
 type Point = { x: number; y: number }; // 画布归一化坐标 [0,1]²（u 向右、v 向下）
@@ -191,6 +192,28 @@ export function FunctionsScene({ active }: SceneProps) {
       return true;
     }
     return false;
+  });
+
+  // 灵犀演示：亲手画目标曲线——经统一 drag 通道（与鼠标/手势同一条路径）逐点流出，end 后自动识别。
+  const demoCancel = useRef(false);
+  const runDrawDemo = async (param?: string) => {
+    demoCancel.current = false;
+    const fam = (['linear', 'quadratic', 'sine'] as FunctionFamily[]).find(f => f === param);
+    const f = fam ? FAMILY_CURVES[fam]
+      : live.current.task === 'B' ? live.current.bTarget.ref
+      : live.current.task === 'A' ? live.current.aTarget.f
+      : FAMILY_CURVES.sine;
+    notify('灵犀开始示范：捏合落笔，从画布最左一路扫到最右——看高度怎么随位置变化。');
+    await emitDragStroke(sampleCurve(f), 18, () => demoCancel.current);
+    if (demoCancel.current) return;
+    notify('示范完成——松手即识别。轮到你了：试着画出同样的形状。');
+  };
+  useSceneAgent('functions', {
+    run: async (script, param) => {
+      if (script === 'draw-target') await runDrawDemo(param);
+      else if (script === 'clear') { clearStroke(); setFit(null); notify('灵犀已清空笔迹，画布归零。'); }
+    },
+    cancel: () => { demoCancel.current = true; },
   });
 
   const pointerState = useRef<{ down: boolean }>({ down: false });

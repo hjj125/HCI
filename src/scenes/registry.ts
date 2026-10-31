@@ -9,6 +9,7 @@ import { MoleculeScene } from './molecule/MoleculeScene';
 import { ReciteScene } from './recite/ReciteScene';
 import { BioMotionScene } from './biomotion/BioMotionScene';
 import { PotteryScene } from './art/PotteryScene';
+import { BloomScene } from './art/BloomScene';
 import { HomeScene } from './home/HomeScene';
 import { GeographyScene } from './geography/GeographyScene';
 import { DayNightScene } from './geography/DayNightScene';
@@ -69,6 +70,7 @@ export const subjects: SubjectGroup[] = [
     id: 'art', title: '美术',
     experiments: [
       { id: 'art-pottery', title: '陶艺工坊', icon: '∪', description: '手势拉坯塑形与对称纹样彩绘（演示 + 任务 A/B/C）', component: PotteryScene },
+      { id: 'art-bloom', title: '手势开花', icon: '✿', description: 'BloomVerse 指尖绽放：3D 花朵随开合绽放、旋转、捏合缩放、挥手风暴与双手花海（演示）', component: BloomScene },
     ],
   },
   {

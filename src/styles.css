@@ -111,3 +111,45 @@ label.file-chip input{position:absolute;width:1px;height:1px;opacity:0}
 .home-card button:hover{border-color:#2dd4bf;transform:translateX(2px)}
 .home-card button .scene-icon{font-size:15px}
 @media(max-width:1000px){.home-cards{grid-template-columns:repeat(2,1fr)}.home-landing h1.home-title{font-size:40px}}
+
+/* ============ BloomVerse · 指尖绽放 ============ */
+.bloom-stage{position:relative;height:min(78vh,820px);min-height:540px;border-radius:16px;overflow:hidden;margin-top:14px;background:radial-gradient(ellipse at 50% 120%,#0d1226,#04060f 70%);border:1px solid #1d2f47;touch-action:none}
+.bloom-stage>canvas{position:absolute;inset:0;display:block}
+.bloom-brand{position:absolute;top:18px;left:22px;z-index:3;font-size:19px;font-weight:750;letter-spacing:1.5px;color:#f2e9dc;text-shadow:0 0 18px rgba(255,214,150,.45);pointer-events:none}
+.bloom-brand span{font-size:12px;font-weight:400;color:#c9b8a3;margin-left:10px;letter-spacing:4px}
+.bloom-hint{position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:3;font-size:13px;color:#dfe8ff;background:rgba(12,18,38,.45);border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:8px 20px;backdrop-filter:blur(12px);white-space:nowrap;pointer-events:none;max-width:92%;overflow:hidden;text-overflow:ellipsis}
+.bloom-status{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:3;display:flex;align-items:center;gap:10px;font-size:11.5px;color:#9fb2d8;letter-spacing:1px;pointer-events:none}
+.bloom-status i{width:3px;height:3px;border-radius:50%;background:#5a6d95}
+.bloom-panel{position:absolute;top:16px;right:16px;z-index:4;width:196px;padding:16px 16px 14px;border-radius:14px;background:rgba(10,15,32,.5);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(16px) saturate(1.35);box-shadow:0 10px 40px rgba(0,0,0,.45);transition:transform .25s,opacity .25s}
+.bloom-panel.collapsed{transform:translateX(calc(100% - 34px));opacity:.85}
+.bloom-panel-tab{position:absolute;left:-1px;top:-1px;width:32px;height:32px;padding:0;border-radius:14px;background:rgba(16,24,48,.85);border:1px solid rgba(255,255,255,.14);color:#cfe0ff;font-size:15px;line-height:1}
+.bloom-panel .bloom-group{margin:6px 0 14px;padding-left:36px}
+.bloom-panel .bloom-group.bloom-tools{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding-left:36px}
+.bloom-panel .bloom-group.bloom-tools button{padding:7px 4px;font-size:11.5px}
+.bloom-label{font-size:10.5px;letter-spacing:2px;color:#8fa2c8;margin-bottom:7px}
+.bloom-chip{display:inline-block;margin:0 5px 6px 0;padding:5px 11px;font-size:12px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)}
+.bloom-chip.selected{background:linear-gradient(135deg,rgba(255,203,130,.32),rgba(255,140,180,.25));border-color:rgba(255,214,160,.65);color:#ffe9cf}
+.bloom-dots{display:flex;gap:9px}
+.bloom-dot{width:26px;height:26px;padding:0;border-radius:50%;border:2px solid rgba(255,255,255,.22)}
+.bloom-dot.selected{border-color:#fff;box-shadow:0 0 12px rgba(255,255,255,.5)}
+.bloom-seg{display:flex;border:1px solid rgba(255,255,255,.16);border-radius:9px;overflow:hidden}
+.bloom-seg button{flex:1;padding:6px 0;font-size:12px;border-radius:0;border:0;background:transparent}
+.bloom-seg button.selected{background:rgba(122,232,212,.18);color:#8ff0dc}
+.bloom-switch{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#a9bbdd;padding-left:36px;cursor:pointer}
+.bloom-switch input{accent-color:#38d8c1}
+.bloom-debug{width:200px;height:150px;margin-top:8px;border-radius:8px;background:rgba(4,8,18,.6);border:1px solid rgba(255,255,255,.1)}
+.bloom-preview{position:absolute;bottom:16px;right:16px;z-index:4;width:158px;border-radius:12px;overflow:hidden;background:rgba(10,15,32,.55);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(10px)}
+.bloom-preview video{width:100%;display:block;transform:scaleX(-1)}
+.bloom-preview span{display:block;font-size:10px;color:#8fa2c8;padding:5px 9px;letter-spacing:1px}
+.bloom-veil{position:absolute;inset:0;z-index:6;display:grid;place-items:center;background:radial-gradient(ellipse at center,rgba(4,6,15,.55),rgba(4,6,15,.92));backdrop-filter:blur(2px);transition:opacity .8s}
+.bloom-invite{text-align:center;max-width:440px;padding:0 20px}
+.bloom-invite h3{font-size:26px;color:#f5ecdf;letter-spacing:2px;margin:0 0 12px;text-shadow:0 0 24px rgba(255,214,150,.4)}
+.bloom-invite p{color:#b9c6e4;font-size:13.5px;margin:0 0 18px}
+.bloom-invite-actions{display:flex;gap:12px;justify-content:center;margin-bottom:14px}
+.bloom-invite .small{font-size:11px;color:#71829f;margin:0}
+.bloom-legend{display:grid;gap:9px}
+.bloom-legend div{display:grid;grid-template-columns:110px 1fr;gap:10px;font-size:12px;align-items:baseline}
+.bloom-legend b{color:#e8ddca;font-weight:600}
+.bloom-legend span{color:#94a8c6}
+
+/* ============================================================
